@@ -121,5 +121,13 @@ struct zram {
 	spinlock_t slot_free_lock;
 
 	struct zram_stats stats;
+#ifdef CONFIG_LZ4_COMPRESS
+  /*if lz4 compress is used as zram compress function, lz4 is true*/
+	bool lz4;
+#endif
 };
+
+#ifdef CONFIG_HSWAP
+extern int zram_free_size(void);
+#endif
 #endif

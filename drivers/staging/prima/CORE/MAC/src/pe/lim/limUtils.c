@@ -576,8 +576,6 @@ char *limMsgStr(tANI_U32 msgType)
             return "eWNI_SME_DEAUTH_CNF";
         case eWNI_SME_MIC_FAILURE_IND:
             return "eWNI_SME_MIC_FAILURE_IND";
-        case eWNI_SME_LOST_LINK_PARAMS_IND:
-            return "eWNI_SME_LOST_LINK_PARAMS_IND";
         case eWNI_SME_ADDTS_REQ:
             return "eWNI_SME_ADDTS_REQ";
         case eWNI_SME_ADDTS_RSP:
@@ -2598,20 +2596,6 @@ void limProcessChannelSwitchTimeout(tpAniSirGlobal pMac)
         return;
     }
     channel = psessionEntry->gLimChannelSwitch.primaryChannel;
-
-    /*
-     * If Lim allows Switch channel on same channel on which preauth
-     * is going on then LIM will not post resume link(WDA_FINISH_SCAN)
-     * during preauth rsp handling hence firmware may crash on ENTER/
-     * EXIT BMPS request.
-     */
-    if(pMac->ft.ftPEContext.pFTPreAuthReq)
-    {
-        limLog(pMac, LOGE,
-           FL("Avoid Switch Channel req during pre auth"));
-        return;
-    }
-
     /*
      *  This potentially can create issues if the function tries to set
      * channel while device is in power-save, hence putting an extra check

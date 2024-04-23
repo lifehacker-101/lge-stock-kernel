@@ -75,7 +75,6 @@
 #include "wlan_nlink_common.h"
 #include "wlan_btc_svc.h"
 #include <bap_hdd_main.h>
-#include "wlan_hdd_tdls.h"
 #include "wlan_hdd_p2p.h"
 #include "cfgApi.h"
 #include "wniCfg.h"
@@ -445,10 +444,6 @@ static int hdd_hostapd_driver_command(hdd_adapter_t *pAdapter,
        }
        hdd_tx_rx_pkt_cnt_stat_timer_handler(pHddCtx);
        sme_SetMiracastMode(pHddCtx->hHal, pHddCtx->drvr_miracast);
-   }
-   else if (strncasecmp(command, "DISABLE_CA_EVENT", 16) == 0)
-   {
-       ret = hdd_enable_disable_ca_event(pHddCtx, command, 16);
    }
 
 exit:
@@ -929,11 +924,21 @@ VOS_STATUS hdd_hostapd_SAPEventCB( tpSap_Event pSapEvent, v_PVOID_t usrDataForCa
 
             pHddApCtx->operatingChannel = 0; //Invalidate the channel info.
 
-            if (pHostapdAdapter->device_mode == WLAN_HDD_P2P_GO)
+            if ((TRUE == pHddCtx->cfg_ini->fEnableTDLSSupport) &&
+                    (TRUE == sme_IsFeatureSupportedByFW(TDLS)) &&
+                    (eTDLS_SUPPORT_ENABLED == pHddCtx->tdls_mode_last ||
+                     eTDLS_SUPPORT_EXPLICIT_TRIGGER_ONLY ==
+                                                pHddCtx->tdls_mode_last))
             {
-                hddLog(LOG1,
-                       FL("P2P Go is getting removed and we are trying to re-enable TDLS"));
-                wlan_hdd_tdls_reenable(pHddCtx);
+                if (pHostapdAdapter->device_mode == WLAN_HDD_P2P_GO)
+                {
+                    /* Enable TDLS support Once P2P session ends since
+                     * upond detection of concurrency TDLS would be disabled
+                     */
+                    hddLog(LOG1, FL("Enable TDLS support"));
+                    wlan_hdd_tdls_set_mode(pHddCtx, pHddCtx->tdls_mode_last,
+                                           FALSE);
+                }
             }
 
             goto stopbss;

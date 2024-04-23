@@ -19,7 +19,7 @@
 #include <linux/page_cgroup.h>
 
 #include <asm/pgtable.h>
-
+#include <linux/export.h>
 /*
  * swapper_space is a fiction, retained to simplify the path through
  * vmscan's shrink_page_list.
@@ -42,7 +42,7 @@ struct address_space swapper_space = {
 	.i_mmap_nonlinear = LIST_HEAD_INIT(swapper_space.i_mmap_nonlinear),
 	.backing_dev_info = &swap_backing_dev_info,
 };
-
+EXPORT_SYMBOL_GPL(swapper_space);
 #define INC_CACHE_INFO(x)	do { swap_cache_info.x++; } while (0)
 
 static struct {
@@ -149,6 +149,11 @@ int add_to_swap(struct page *page)
 	VM_BUG_ON(!PageLocked(page));
 	VM_BUG_ON(!PageUptodate(page));
 
+#ifdef CONFIG_HSWAP
+	if (!current_is_kswapd())
+		entry = get_lowest_prio_swap_page();
+	else
+#endif
 	entry = get_swap_page();
 	if (!entry.val)
 		return 0;
@@ -376,7 +381,8 @@ struct page *swapin_readahead(swp_entry_t entry, gfp_t gfp_mask,
 	struct page *page;
 	unsigned long offset = swp_offset(entry);
 	unsigned long start_offset, end_offset;
-	unsigned long mask = (1UL << page_cluster) - 1;
+	unsigned long mask = is_swap_fast(entry) ? 0 :
+				(1UL << page_cluster) - 1;
 
 	/* Read a page_cluster sized and aligned cluster around offset. */
 	start_offset = offset & ~mask;

@@ -418,7 +418,7 @@ typedef enum
   /*Delete BA Ind*/
   WDI_DEL_BA_IND,
   WDI_NAN_EVENT_IND,
-  WDI_LOST_LINK_PARAMS_IND,
+
   WDI_MAX_IND
 }WDI_LowLevelIndEnumType;
 
@@ -736,19 +736,6 @@ typedef struct
 #endif
 
 
-typedef struct
-{
-  wpt_uint8  bssIdx;
-  wpt_uint8  rssi;
-  wpt_uint8  selfMacAddr[WDI_MAC_ADDR_LEN];
-  wpt_uint32 linkFlCnt;
-  wpt_uint32 linkFlTx;
-  wpt_uint32 lastDataRate;
-  wpt_uint32 rsvd1;
-  wpt_uint32 rsvd2;
-
-}WDI_LostLinkParamsIndType;
-
 /*---------------------------------------------------------------------------
  WDI_IbssPeerInactivityIndType
 -----------------------------------------------------------------------------*/
@@ -979,7 +966,6 @@ typedef struct
     WDI_NanEventType wdiNanEvent;
 
     WDI_TxBDStatus              wdiTxBdInd;
-    WDI_LostLinkParamsIndType   wdiLostLinkParamsInd;
   }  wdiIndicationData;
 }WDI_LowLevelIndType;
 
@@ -8061,7 +8047,8 @@ typedef void  (*WDI_GetFrameLogRspCb)(
 typedef void  (*WDI_FatalEventLogsRspCb)(
                          WDI_FatalEventLogsRspParamType *wdiRsp, void *pUserData);
 
-typedef void  (*WDI_MonModeRspCb)(void *pEventData,void *pUserData);
+typedef void  (*WDI_MonStartRspCb)(void *pEventData,void *pUserData);
+typedef void  (*WDI_MonStopRspCb)(void *pUserData);
 
 /*========================================================================
  *     Function Declarations and Documentation
@@ -11449,13 +11436,13 @@ WDI_Status WDI_FWStatsGetReq
 WDI_Status WDI_MonStartReq
 (
     WDI_MonStartReqType*   pwdiMonStartReqParams,
-    WDI_MonModeRspCb       wdiMonModeRspCb,
+    WDI_MonStartRspCb      wdiMonStartRspCb,
     void*                  pUserData
 );
 
 WDI_Status WDI_MonStopReq
 (
-    WDI_MonModeRspCb       wdiMonModeRspCb,
+    WDI_MonStopRspCb      wdiMonStopRspCb,
     void*                  pUserData
 );
 
@@ -11585,21 +11572,6 @@ WDI_Status
 WDI_FWLoggingDXEdoneInd
 (
   WDI_FWLoggingDXEdoneIndInfoType*    pwdiFWLoggingDXEdoneInd
-);
-
-/**
- @brief WDI_EnableDisableCAEventInd
-        Enable/Disable Chan Avoidance indication
-
- @param val: Enable/Disable Chan Avoidance indication
-
- @return Result of the function call
-*/
-
-WDI_Status
-WDI_EnableDisableCAEventInd
-(
-wpt_uint32 val
 );
 
 #ifdef __cplusplus
