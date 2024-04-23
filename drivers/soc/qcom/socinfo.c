@@ -21,7 +21,10 @@
 #include <soc/qcom/socinfo.h>
 #include <linux/soc/qcom/smem.h>
 #include <soc/qcom/boot_stats.h>
-#include <asm/unaligned.h>
+
+#ifdef CONFIG_MACH_LGE
+#include <soc/qcom/lge/board_lge.h>
+#endif
 
 #define BUILD_ID_LENGTH 32
 #define CHIP_ID_LENGTH 32
@@ -341,7 +344,6 @@ static struct msm_soc_info cpu_of_id[] = {
 
 	/* Khaje ID */
 	[518] = {MSM_CPU_KHAJE, "KHAJE"},
-	[586] = {MSM_CPU_KHAJE, "KHAJE"},
 
 	/* Khajep ID */
 	[561] = {MSM_CPU_KHAJEP, "KHAJEP"},
@@ -804,7 +806,7 @@ msm_get_serial_number(struct device *dev,
 			struct device_attribute *attr,
 			char *buf)
 {
-	return snprintf(buf, PAGE_SIZE, "%u\n",
+	return snprintf(buf, PAGE_SIZE, "0x%08x\n",
 		socinfo_get_serial_number());
 }
 
@@ -871,42 +873,6 @@ msm_get_ncluster_array_offset(struct device *dev,
 		socinfo_get_ncluster_array_offset());
 }
 
-uint32_t
-socinfo_get_cluster_info(enum defective_cluster_type cluster)
-{
-	uint32_t def_cluster, num_cluster, offset;
-	void *cluster_val;
-	void *info = socinfo;
-
-	if (cluster >= NUM_CLUSTERS_MAX) {
-		pr_err("Bad cluster\n");
-		return -EINVAL;
-	}
-
-	num_cluster = socinfo_get_num_clusters();
-	offset = socinfo_get_ncluster_array_offset();
-
-	if (!num_cluster || !offset)
-		return -EINVAL;
-
-	info += offset;
-	cluster_val = info + (sizeof(uint32_t) * cluster);
-	def_cluster = get_unaligned_le32(cluster_val);
-
-	return def_cluster;
-}
-EXPORT_SYMBOL(socinfo_get_cluster_info);
-
-static ssize_t
-msm_get_defective_cores(struct device *dev,
-		struct device_attribute *attr,
-		char *buf)
-{
-	uint32_t def_cluster = socinfo_get_cluster_info(CLUSTER_CPUSS);
-
-	return scnprintf(buf, PAGE_SIZE, "%x\n", def_cluster);
-}
-
 static ssize_t
 msm_get_num_defective_parts(struct device *dev,
 			struct device_attribute *attr,
@@ -923,60 +889,6 @@ msm_get_ndefective_parts_array_offset(struct device *dev,
 {
 	return snprintf(buf, PAGE_SIZE, "0x%x\n",
 		socinfo_get_ndefective_parts_array_offset());
-}
-
-static uint32_t
-socinfo_get_defective_parts(void)
-{
-	uint32_t num_parts = socinfo_get_num_defective_parts();
-	uint32_t offset = socinfo_get_ndefective_parts_array_offset();
-	uint32_t def_parts = 0;
-	void *info = socinfo;
-	uint32_t part_entry;
-	int i;
-
-	if (!num_parts || !offset)
-		return -EINVAL;
-
-	info += offset;
-	for (i = 0; i < num_parts; i++) {
-		part_entry = get_unaligned_le32(info);
-		if (part_entry)
-			def_parts |= BIT(i);
-		info += sizeof(uint32_t);
-	}
-
-	return def_parts;
-}
-
-bool
-socinfo_get_part_info(enum defective_part_type part)
-{
-	uint32_t partinfo;
-
-	if (part >= NUM_PARTS_MAX) {
-		pr_err("Bad part number\n");
-		return false;
-	}
-
-	partinfo = socinfo_get_defective_parts();
-	if (partinfo < 0) {
-		pr_err("Failed to get part information\n");
-		return false;
-	}
-
-	return (partinfo & BIT(part));
-}
-EXPORT_SYMBOL(socinfo_get_part_info);
-
-static ssize_t
-msm_get_defective_parts(struct device *dev,
-		struct device_attribute *attr,
-		char *buf)
-{
-	uint32_t def_parts = socinfo_get_defective_parts();
-
-	return scnprintf(buf, PAGE_SIZE, "%x\n", def_parts);
 }
 
 static ssize_t
@@ -1212,6 +1124,21 @@ msm_get_images(struct device *dev,
 	return pos;
 }
 
+#ifdef CONFIG_MACH_LGE
+static ssize_t
+msm_get_hw_rev(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	enum hw_rev_no revid = lge_get_board_rev_no();
+
+	pr_err("hw_rev called'\n");
+	pr_err("hw_rev id:%d\n",revid);
+	pr_err("hw_rev :%s",lge_get_board_revision());
+
+	return snprintf(buf, PAGE_SIZE, "%-.32s\n", lge_get_board_revision());
+}
+#endif
+
 static struct device_attribute msm_soc_attr_raw_version =
 	__ATTR(raw_version, 0444, msm_get_raw_version,  NULL);
 
@@ -1283,10 +1210,6 @@ static struct device_attribute msm_soc_attr_ncluster_array_offset =
 	__ATTR(ncluster_array_offset, 0444,
 			msm_get_ncluster_array_offset, NULL);
 
-static struct device_attribute msm_soc_attr_defective_cores =
-	__ATTR(defective_cores, 0444,
-			msm_get_defective_cores, NULL);
-
 static struct device_attribute msm_soc_attr_num_defective_parts =
 	__ATTR(num_defective_parts, 0444,
 			msm_get_num_defective_parts, NULL);
@@ -1294,10 +1217,6 @@ static struct device_attribute msm_soc_attr_num_defective_parts =
 static struct device_attribute msm_soc_attr_ndefective_parts_array_offset =
 	__ATTR(ndefective_parts_array_offset, 0444,
 			msm_get_ndefective_parts_array_offset, NULL);
-
-static struct device_attribute msm_soc_attr_defective_parts =
-	__ATTR(defective_parts, 0444,
-			msm_get_defective_parts, NULL);
 
 static struct device_attribute msm_soc_attr_nmodem_supported =
 	__ATTR(nmodem_supported, 0444,
@@ -1329,6 +1248,11 @@ static struct device_attribute select_image =
 
 static struct device_attribute images =
 	__ATTR(images, 0444, msm_get_images, NULL);
+
+#ifdef CONFIG_MACH_LGE
+static struct device_attribute msm_soc_attr_hw_rev =
+	__ATTR(hw_rev, S_IRUGO, msm_get_hw_rev, NULL);
+#endif
 
 static void * __init setup_dummy_socinfo(void)
 {
@@ -1498,13 +1422,9 @@ static void __init populate_soc_sysfs_files(struct device *msm_soc_device)
 		device_create_file(msm_soc_device,
 					&msm_soc_attr_ncluster_array_offset);
 		device_create_file(msm_soc_device,
-					&msm_soc_attr_defective_cores);
-		device_create_file(msm_soc_device,
 					&msm_soc_attr_num_defective_parts);
 		device_create_file(msm_soc_device,
 				&msm_soc_attr_ndefective_parts_array_offset);
-		device_create_file(msm_soc_device,
-					&msm_soc_attr_defective_parts);
 	case SOCINFO_VERSION(0, 13):
 		 device_create_file(msm_soc_device,
 					&msm_soc_attr_nproduct_id);
@@ -1552,6 +1472,10 @@ static void __init populate_soc_sysfs_files(struct device *msm_soc_device)
 	case SOCINFO_VERSION(0, 1):
 		device_create_file(msm_soc_device,
 					&msm_soc_attr_build_id);
+#ifdef CONFIG_MACH_LGE
+		device_create_file(msm_soc_device,
+					&msm_soc_attr_hw_rev);
+#endif
 		break;
 	default:
 		pr_err("Unknown socinfo format: v%u.%u\n",
