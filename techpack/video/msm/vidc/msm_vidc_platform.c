@@ -943,15 +943,11 @@ static struct msm_vidc_common_data lito_common_data_v0[] = {
 	},
 	{
 		.key = "qcom,max-hw-load",
-		.value = 1958400,
+		.value = 2220544,
 		/**
-		 * ((3840x2176)/256)@60
-		 * UHD@30 decode + UHD@30 encode
+		 * ((3840x2176)/256)@60 + ((8192x8192)/256)@1fps
+		 * UHD@30 decode + UHD@30 encode + ((8192x8192)/256)@1fps
 		 */
-	},
-	{
-		.key = "qcom,max-image-load",
-		.value = 262144, /* ((8192x8192)/256)@1fps */
 	},
 	{
 		.key = "qcom,max-hq-mbs-per-frame",
@@ -1030,14 +1026,10 @@ static struct msm_vidc_common_data lito_common_data_v1[] = {
 	},
 	{
 		.key = "qcom,max-hw-load",
-		.value = 1224000,
+		.value = 1486144,
 		/**
-		 * UHD@30 decode + 1080@30 encode
+		 * UHD@30 decode + 1080@30 encode + ((8192x8192)/256)@1fps
 		 */
-	},
-		{
-		.key = "qcom,max-image-load",
-		.value = 262144, /* ((8192x8192)/256)@1fps */
 	},
 	{
 		.key = "qcom,max-hq-mbs-per-frame",
@@ -1116,15 +1108,11 @@ static struct msm_vidc_common_data lagoon_common_data_v0[] = {
 	},
 	{
 		.key = "qcom,max-hw-load",
-		.value = 1958400,
+		.value = 2220544,
 		/**
-		 * ((3840x2176)/256)@60
-		 * UHD@30 decode + UHD@30 encode
+		 * ((3840x2176)/256)@60fps decode + ((8192x8192)/256)@1fps
+		 * UHD@30 decode + 1080@30 encode + ((8192x8192)/256)@1fps
 		 */
-	},
-	{
-		.key = "qcom,max-image-load",
-		.value = 262144,/* ((8192x8192)/256)@1fps */
 	},
 	{
 		.key = "qcom,max-mbpf",
@@ -1203,14 +1191,8 @@ static struct msm_vidc_common_data lagoon_common_data_v1[] = {
 	},
 	{
 		.key = "qcom,max-hw-load",
-		.value = 1224000,
-		/**
-		 * UHD@30 decode + 1080@30 encode
-		 */
-	},
-	{
-		.key = "qcom,max-image-load",
-		.value = 262144, /* ((8192x8192)/256)@1fps */
+		.value = 1486144,
+		/* UHD@30 decode + 1080@30 encode + ((8192x8192)/256)@1fps */
 	},
 	{
 		.key = "qcom,max-mbpf",
@@ -1289,17 +1271,13 @@ static struct msm_vidc_common_data kona_common_data[] = {
 	},
 	{
 		.key = "qcom,max-hw-load",
-		.value = 7833600,
+		.value = 8882176,
 		/**
 		 * (7680x4320@60fps, 3840x2176@240fps
 		 * Greater than 4096x2176@120fps,
-		 *  8192x4320@48fps)
+		 *  8192x4320@48fps) + ((16384x16384)/256)@1fps
 		 */
 
-	},
-	{
-		.key = "qcom,max-image-load",
-		.value = 1048576, /* ((16384x16384)/256)@1fps */
 	},
 	{
 		.key = "qcom,max-mbpf",
@@ -1441,11 +1419,8 @@ static struct msm_vidc_common_data bengal_common_data_v0[] = {
 	},
 	{
 		.key = "qcom,max-hw-load",
-		.value = 489600, /* ((1088x1920)/256)@60fps */
-	},
-	{
-		.key = "qcom,max-image-load",
-		.value = 262144, /* ((8192x8192)/256)@1fps */
+		.value = 751744,
+		/* ((1088x1920)/256)@60fps + ((8192x8192)/256)@1fps */
 	},
 	{
 		.key = "qcom,max-mbpf",
@@ -1500,11 +1475,8 @@ static struct msm_vidc_common_data bengal_common_data_v1[] = {
 	},
 	{
 		.key = "qcom,max-hw-load",
-		.value = 244800, /* ((1088x1920)/256)@30fps */
-	},
-	{
-		.key = "qcom,max-image-load",
-		.value = 262144, /* ((8192x8192)/256)@1fps */
+		.value = 506944,
+		/* ((1088x1920)/256)@30fps + ((8192x8192)/256)@1fps */
 	},
 	{
 		.key = "qcom,max-mbpf",
@@ -1559,12 +1531,8 @@ static struct msm_vidc_common_data scuba_common_data[] = {
 	},
 	{
 		.key = "qcom,max-hw-load",
-		.value = 352800,
-		/* ((1088x1920)/256)@30fps + ((720x1280)/256)@30fps*/
-	},
-	{
-		.key = "qcom,max-image-load",
-		.value = 262144, /* ((8192x8192)/256)@1fps */
+		.value = 506944,
+		/* ((1088x1920)/256)@30fps + ((8192x8192)/256)@1fps */
 	},
 	{
 		.key = "qcom,max-mbpf",

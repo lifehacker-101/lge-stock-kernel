@@ -1486,4 +1486,6 @@ source "drivers/scsi/device_handler/Kconfig"
 
 source "drivers/scsi/osd/Kconfig"
 
+source "drivers/scsi/Kconfig.lfs"
+
 endmenu

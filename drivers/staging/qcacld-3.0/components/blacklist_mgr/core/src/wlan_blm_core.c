@@ -333,6 +333,7 @@ blm_update_avoidlist_reject_reason(struct blm_reject_ap *entry,
 		break;
 	default:
 		blm_err("Invalid reason passed %d", reject_reason);
+		break;
 	}
 }
 
@@ -445,6 +446,7 @@ blm_update_rssi_reject_reason(struct blm_reject_ap *entry,
 		break;
 	default:
 		blm_err("Invalid reason passed %d", reject_reason);
+		break;
 	}
 }
 

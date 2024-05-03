@@ -27,6 +27,13 @@
 enum field_width {
 	BYTE	= 1,
 	WORD	= 2,
+#ifdef CONFIG_LFS_UFS
+	BYTE_3	= 3,
+	DWORD   = 4,
+	LONG	= 8,
+	BYTE_12	= 12,
+	BYTE_24	= 24,
+#endif
 };
 
 struct desc_field_offset {
@@ -870,6 +877,1215 @@ static const struct file_operations ufsdbg_host_regs_fops = {
 	.read		= seq_read,
 };
 
+#ifdef CONFIG_LFS_UFS
+static int array_to_hex_val(u8 *array, int size)
+{
+	int i;
+	int ret = 0;
+	for (i=0; i<size; i++){
+		ret = ret*0x100;
+		ret += array[i];
+	}
+	return ret;
+}
+
+static int ufsdbg_dump_geo_desc_show(struct seq_file *file, void *data)
+{
+	int err = 0, i;
+	int buff_len = QUERY_DESC_GEOMETRY_DEF_SIZE;
+	u8 desc_buf[QUERY_DESC_GEOMETRY_DEF_SIZE];
+	struct ufs_hba *hba = (struct ufs_hba *)file->private;
+	struct desc_field_offset *tmp;
+
+	struct desc_field_offset geo_desc_field_name[] = {
+		{"bLength",			0x00, BYTE},
+		{"bDescriptorType",		0x01, BYTE},
+		{"bMediaTechnology",		0x02, BYTE},
+		{"qTotalRawDeviceCapacity",	0x04, LONG},
+		{"bMaxNumberLU",		0x0C, BYTE},
+		{"dSegmentSize",		0x0D, DWORD},
+		{"bAllocationUnitSize",		0x11, BYTE},
+		{"bMinAddrBlockSize",		0x12, BYTE},
+		{"bOptimalReadBlockSize",	0x13, BYTE},
+		{"bOptimalWriteBlockSize",	0x14, BYTE},
+		{"bMaxInBufferSize",		0x15, BYTE},
+		{"bMaxOutBufferSize",		0x16, BYTE},
+		{"bRPMB_ReadWriteSize",		0x17, BYTE},
+		{"bDataOrdering",		0x19, BYTE},
+		{"bMaxCountexIDNumber",		0x1A, BYTE},
+		{"bSysDataTagUnitSize",		0x1B, BYTE},
+		{"bSysDataTagResSize",		0x1C, BYTE},
+		{"bSupportedSecRTypes",		0x1D, BYTE},
+		{"wSupportedMemoryTypes",	0x1E, WORD},
+		{"dSystemCodeMaxNAllocU",	0x20, DWORD},
+		{"wSystemCodeCapAdjFac",	0x24, WORD},
+		{"dNonPersistMaxNAllocU",	0x26, DWORD},
+		{"wNonPersistCapAdjFac",	0x2A, WORD},
+		{"dEnhanced1MaxNAllocU",	0x2C, DWORD},
+		{"wEnhanced1CapAdjFac",		0x30, WORD},
+		{"dEnhanced2MaxNAllocU",	0x32, DWORD},
+		{"wEnhanced2CapAdjFac",		0x36, WORD},
+		{"dEnhanced3MaxNAllocU",	0x38, DWORD},
+		{"wEnhanced3CapAdjFac",		0x3C, WORD},
+		{"dEnhanced4MaxNAllocU",	0x3E, DWORD},
+		{"wEnhanced4CapAdjFac",		0x42, WORD},
+	};
+
+	pm_runtime_get_sync(hba->dev);
+	err = ufshcd_read_geo_desc(hba, desc_buf, buff_len);
+	pm_runtime_put_sync(hba->dev);
+
+	if(!err) {
+		for (i = 0; i < ARRAY_SIZE(geo_desc_field_name); ++i){
+			tmp = & geo_desc_field_name[i];
+			seq_printf(file,
+					"Geometry Descriptor[Byte offset 0x%x]: %s = 0x%x\n",
+					tmp->offset,
+					tmp->name,
+					array_to_hex_val(&desc_buf[tmp->offset], tmp->width_byte));
+		}
+	} else {
+		seq_printf(file, "Reading Geometry Descriptor failed. err = %d\n",
+				err);
+	}
+
+	return err;
+}
+
+#include <asm/unaligned.h>
+#include "ufs_quirks.h"
+#include <linux/ctype.h>
+static void ufsdbg_print_ascii(struct seq_file *file, const char *prefix, struct desc_field_offset *tmp, u8 *desc_buf)
+{
+	u8 ch = 0, j = 0;
+	unsigned char *linebuf = NULL;
+
+	if (tmp && tmp->width_byte>0)
+		linebuf = kzalloc(tmp->width_byte+1, GFP_KERNEL);
+	if (!linebuf)
+		return;
+	memset(linebuf, 0x0, tmp->width_byte+1);
+
+	for (j=0; j < tmp->width_byte; j++) {
+		ch = desc_buf[tmp->offset+j];
+		linebuf[j] = (isascii(ch) && isprint(ch)) ? ch : '.';
+	}
+	seq_printf(file,
+		"%s : [Byte offset 0x%02x]: %s = %s\n", prefix,
+		tmp->offset,
+		tmp->name,
+		linebuf);
+
+	if (linebuf)
+		kfree(linebuf);
+}
+
+void ufsdbg_print_samsung_device_report_set_password(struct ufs_hba *hba)
+{
+	unsigned char set_pw_cmd[16] = {0,};
+
+	int err = 0;
+	struct scsi_sense_hdr sshdr;
+	struct scsi_device *sdev = NULL;
+
+	set_pw_cmd[0] = 0xC0;
+	set_pw_cmd[1] = 0x03;
+
+	set_pw_cmd[2] = 0x01;
+	set_pw_cmd[3] = 0x02;
+	set_pw_cmd[4] = 0x03;
+	set_pw_cmd[5] = 0x04;
+
+	// seems all general LU have the same record, so targeting to LUN0
+	sdev = scsi_device_lookup(hba->sdev_ufs_device->host, 0, 0, 0);
+	if (!sdev) {
+		pr_err("%s: fail to get lun0 device\n", __func__);
+		return;
+	}
+	//1. set password
+	err = scsi_execute_req(sdev, set_pw_cmd, DMA_NONE, NULL,
+				  0, &sshdr, 30 * HZ, 3, NULL);
+
+	scsi_device_put(sdev);
+
+	if (err) {
+		pr_err("%s: Password set fail to get device report for lun0 err=%d\n", __func__, err);
+		if (scsi_sense_valid(&sshdr)) {
+			pr_err("%s: sshdr : response_code(%d)/sense_key(%d)/asc(%d)/ascq(%d)\n", __func__,
+				sshdr.response_code, sshdr.sense_key, sshdr.asc, sshdr.ascq);
+		}
+	}
+
+}
+
+void ufsdbg_print_samsung_device_report_read(struct seq_file *file)
+{
+	#define CMD_LEN 16
+	#define SS_BUFFER_LEN	96
+	struct ufs_hba *hba = (struct ufs_hba *)file->private;
+	struct desc_field_offset *tmp;
+	unsigned char read_information_cmd[CMD_LEN] = {0,};
+	unsigned char vendor_enter_cmd[CMD_LEN] = {0,};
+	unsigned char vendor_exit_cmd[CMD_LEN] = {0,};
+	u8 *device_report_buf = 0;
+	int err = 0, i;
+	struct scsi_sense_hdr sshdr;
+	struct scsi_device *sdev = NULL;
+
+
+	struct desc_field_offset device_report_field_name[] = {
+		{"bLength",							0x00, DWORD},
+		{"bDescriptorType",					0x04, BYTE},
+		{"bSSRVersion",						0x06, WORD},
+		{"bMaximumEraseCycle(SLC)",			0x08, DWORD},
+		{"bMinimumEraseCycle(SLC)",			0x0C, DWORD},
+		{"bAverageEaseCycle(SLC)",			0x10, DWORD},
+		{"bMaximumEraseCycle(TLC)",			0x14, DWORD},
+		{"bMinimumEraseCycle(TLC)",			0x18, DWORD},
+		{"bAverageEaseCycle(TLC)",			0x1C, DWORD},
+		{"bMinimumBlockErase(TLC)",			0x10, DWORD},
+		{"bMaximumBlockErase(TLC)",			0x14, DWORD},
+		{"bAverageBlockErase(TLC)",			0x18, DWORD},
+		{"bReadReclaimCount",			   	0x20, DWORD},
+		{"bInitialBadBlock",				0x24, DWORD},
+		{"bRuntimeBadBlock",				0x28, DWORD},
+		{"bRemainReservedBlock",			0x2C, DWORD},
+		{"bReserved",						0x30, DWORD},
+		{"bReserved",						0x34, DWORD},
+		{"bWrittenData(10MB Unit)",			0x38, DWORD},
+		{"bOpenCount",						0x3C, DWORD},
+		{"bFirmwareSuccessCount",			0x40, DWORD},
+		{"bReserved",						0x44, DWORD},
+		{"bReserved",						0x48, DWORD},
+		{"bPON_InitializationCount",		0x4C, DWORD},
+		{"bSPOR_InitializationCount",		0x50, DWORD},
+		{"bReserved",						0x54, DWORD},
+	};
+
+	device_report_buf = kzalloc(SS_BUFFER_LEN, GFP_KERNEL);
+	if (!device_report_buf)
+		return;
+
+	memset(device_report_buf, 0x00, SS_BUFFER_LEN);
+
+	vendor_enter_cmd[0] = 0xC0;
+	vendor_enter_cmd[1] = 0x00;
+	vendor_enter_cmd[2] = 0x5C;
+	vendor_enter_cmd[3] = 0x38;
+	vendor_enter_cmd[4] = 0x23;
+	vendor_enter_cmd[5] = 0xAE;
+	vendor_enter_cmd[6] = 0x01;
+	vendor_enter_cmd[7] = 0x02;
+	vendor_enter_cmd[8] = 0x03;
+	vendor_enter_cmd[9] = 0x04;
+
+	vendor_exit_cmd[0] = 0xC0;
+	vendor_exit_cmd[1] = 0x01;
+
+	read_information_cmd[0] = 0xC0;
+	read_information_cmd[1] = 0x40;
+
+	read_information_cmd[4] = 0x01;
+	read_information_cmd[5] = 0x0A;
+
+	read_information_cmd[15] = 0x60;
+
+	// seems all general LU have the same record, so targeting to LUN0
+	sdev = scsi_device_lookup(hba->sdev_ufs_device->host, 0, 0, 0);
+	if (!sdev) {
+		pr_err("%s: fail to get lun0 device\n", __func__);
+		kfree(device_report_buf);
+		return;
+	}
+
+	//2. vendor mode enter
+    err = scsi_execute_req(sdev, vendor_enter_cmd, DMA_NONE, NULL,
+				  0, &sshdr, 30 * HZ, 3, NULL);
+
+	if (err) {
+		pr_err("%s: vendor mode enter fail to get device report for lun0 err=%d\n", __func__, err);
+		if (scsi_sense_valid(&sshdr)) {
+			pr_err("%s: sshdr : response_code(%d)/sense_key(%d)/asc(%d)/ascq(%d)\n", __func__,
+				sshdr.response_code, sshdr.sense_key, sshdr.asc, sshdr.ascq);
+		}
+		goto out_free;
+	}
+
+
+	//3. Nand information read
+	err = scsi_execute_req(sdev, read_information_cmd, DMA_FROM_DEVICE, device_report_buf,
+				  SS_BUFFER_LEN, &sshdr, 30 * HZ, 3, NULL);
+
+	if (err) {
+		pr_err("%s: 96 read fail to get device report for lun0 err=%d\n", __func__, err);
+		if (scsi_sense_valid(&sshdr)) {
+			pr_err("%s: sshdr : response_code(%d)/sense_key(%d)/asc(%d)/ascq(%d)\n", __func__,
+				sshdr.response_code, sshdr.sense_key, sshdr.asc, sshdr.ascq);
+		}
+
+	}
+
+	//4 vendor mode exit
+	err = scsi_execute_req(sdev, vendor_exit_cmd, DMA_NONE, NULL,
+				  0, &sshdr, 30 * HZ, 3, NULL);
+
+	if (err) {
+		pr_err("%s: vendor mode exit fail to get device report for lun0 err=%d\n", __func__, err);
+		if (scsi_sense_valid(&sshdr)) {
+			pr_err("%s: sshdr : response_code(%d)/sense_key(%d)/asc(%d)/ascq(%d)\n", __func__,
+				sshdr.response_code, sshdr.sense_key, sshdr.asc, sshdr.ascq);
+		}
+
+		goto out_free;
+	}
+
+	seq_printf(file,
+		"= = = = = = = = = = = = = = = = = = = = = = = = = = = = = =\n");
+
+	// seems little endian
+	for (i = 0; i < ARRAY_SIZE(device_report_field_name); ++i) {
+		u64 val = 0;
+
+		tmp = &device_report_field_name[i];
+
+		switch (tmp->width_byte) {
+			case BYTE:
+				val = (u8)device_report_buf[tmp->offset];
+				break;
+			case WORD:
+				val = (u16)get_unaligned_be16(&device_report_buf[tmp->offset]);
+				break;
+			case DWORD:
+				val = (u32)get_unaligned_be32(&device_report_buf[tmp->offset]);
+				break;
+			default:
+				break;
+		}
+
+		seq_printf(file,
+			"Samsung Device Report : [Byte offset 0x%02x]: %s = 0x%llx\n",
+			tmp->offset,
+			tmp->name,
+			val);
+	}
+
+out_free:
+	scsi_device_put(sdev);
+	if (device_report_buf)
+		kfree(device_report_buf);
+
+}
+
+static void ufsdbg_print_samsung_device_report(struct seq_file *file, void *data)
+{
+	struct ufs_hba *hba = (struct ufs_hba *)file->private;
+	//1. password set
+	ufsdbg_print_samsung_device_report_set_password(hba);
+
+	//2. Nand information read
+	ufsdbg_print_samsung_device_report_read(file);
+
+}
+
+void ufsdbg_print_micron_device_report_write(struct ufs_hba *hba)
+{
+	#define WRITE_BUFFER_LEN 44
+
+	unsigned char write_cmd[10];
+
+	u8 *write_device_report_buf = 0;
+	int err = 0;
+	struct scsi_sense_hdr sshdr;
+	struct scsi_device *sdev = NULL;
+
+	write_device_report_buf = kzalloc(WRITE_BUFFER_LEN, GFP_KERNEL);
+	if (!write_device_report_buf)
+		return;
+
+	write_cmd[0] = 0x3B;
+	write_cmd[1] = 0xE1;
+	write_cmd[2] = 0;
+
+	write_cmd[3] = 0;
+	write_cmd[4] = 0;
+	write_cmd[5] = 0;
+
+	write_cmd[6] = 0;
+	write_cmd[7] = 0;
+	write_cmd[8] = 0x2C;
+	write_cmd[9] = 0;
+
+	memset(write_device_report_buf, 0x00, WRITE_BUFFER_LEN);
+
+	write_device_report_buf[0] = 0xFE;
+	write_device_report_buf[1] = 0x40;
+	write_device_report_buf[2] = 0;
+	write_device_report_buf[3] = 0x10;
+	write_device_report_buf[4] = 0x01;
+
+	/* seems all general LU have the same record, so targeting to LUN0 */
+	sdev = scsi_device_lookup(hba->sdev_ufs_device->host, 0, 0, 0);
+	if (!sdev) {
+		pr_err("%s: fail to get lun0 device\n", __func__);
+		kfree(write_device_report_buf);
+		return;
+	}
+
+	//1. Command descriptor block (CDB) for WRITE BUFFER
+	err = scsi_execute_req(sdev, write_cmd, DMA_TO_DEVICE, write_device_report_buf,
+				  WRITE_BUFFER_LEN, &sshdr, 30 * HZ, 3, NULL);
+
+	scsi_device_put(sdev);
+
+	if (err) {
+		pr_err("%s: write fail to get device report for lun0 err=%d\n", __func__, err);
+		if (scsi_sense_valid(&sshdr)) {
+			pr_err("%s: sshdr : response_code(%d)/sense_key(%d)/asc(%d)/ascq(%d)\n", __func__,
+				sshdr.response_code, sshdr.sense_key, sshdr.asc, sshdr.ascq);
+		}
+
+		goto out_free;
+	}
+
+out_free:
+	if (write_device_report_buf)
+		kfree(write_device_report_buf);
+
+
+}
+
+void ufsdbg_print_micron_device_report_read(struct seq_file *file)
+{
+	#define DR_BUFFER_LEN 512
+	struct ufs_hba *hba = (struct ufs_hba *)file->private;
+	struct desc_field_offset *tmp;
+	unsigned char cmd[10];
+	u8 *device_report_buf = 0;
+	int err = 0, i;
+	struct scsi_sense_hdr sshdr;
+	struct scsi_device *sdev = NULL;
+
+	struct desc_field_offset device_report_field_name[] = {
+		{"bFactoryBadBlockCount",			0x00, WORD},
+		{"bRuntimeBadBlockCount",			0x02, WORD},
+		{"bSpareBlockCount",				0x04, WORD},
+		{"bReservedBlockCount(SLC)",		0x06, WORD},
+		{"bReservedBlockCount(TLC)",		0x08, WORD},
+		{"bExhaustedLife(SLC)",				0x0A, BYTE},
+		{"bExhaustedLife(TLC)",				0x0B, BYTE},
+		{"bMetadataCorruption",				0x0C, WORD},
+		{"bWriteAmplificationFactor",		0x0E, WORD},
+		{"bMinimumBlockErase(TLC)",			0x10, DWORD},
+		{"bMaximumBlockErase(TLC)",			0x14, DWORD},
+		{"bAverageBlockErase(TLC)",			0x18, DWORD},
+		{"bReserved",			   			0x1C, DWORD},
+		{"bMinimumBlockErase(SLC)",			0x20, DWORD},
+		{"bMaximumBlockErase(SLC)",			0x24, DWORD},
+		{"bAverageBlockErase(SLC)",			0x28, DWORD},
+		{"bReserved",						0x2C, DWORD},
+		{"bInitializationCount(success)",	0x30, DWORD},
+		{"bInitializationCount(failure)",	0x34, DWORD},
+		{"bReadReclaimCount(SLC)",			0x38, DWORD},
+		{"bReadReclaimCount(TLC)",			0x3C, DWORD},
+		{"bReadDataSize(100MB unit)",		0x40, DWORD},
+		{"bWrittenDataSize(100MB unit)",	0x44, DWORD},
+		{"bSPOR_WriteFailCount",			0x48, DWORD},
+		{"bSPOR_RecoveryCount",				0x4C, DWORD},
+		{"bVDET_Count",						0x50, DWORD},
+		{"bUECC_Count",						0x54, DWORD},
+		{"bReadRetryCount",					0x58, DWORD},
+		{"bReserved",						0x5C, DWORD},
+	};
+
+	device_report_buf = kzalloc(DR_BUFFER_LEN, GFP_KERNEL);
+	if (!device_report_buf)
+		return;
+
+	memset(device_report_buf, 0x00, DR_BUFFER_LEN);
+
+	cmd[0] = 0x3C;
+	cmd[1] = 0xC1;
+	cmd[2] = 0;
+
+	cmd[3] = 0;
+	cmd[4] = 0;
+	cmd[5] = 0;
+
+	cmd[6] = 0;
+	cmd[7] = 0x02;
+	cmd[8] = 0;
+	cmd[9] = 0;
+
+	/* seems all general LU have the same record, so targeting to LUN0 */
+	sdev = scsi_device_lookup(hba->sdev_ufs_device->host, 0, 0, 0);
+	if (!sdev) {
+		pr_err("%s: fail to get lun0 device\n", __func__);
+		kfree(device_report_buf);
+		return;
+	}
+
+	//2. CDB for READ BUFFER
+	err = scsi_execute_req(sdev, cmd, DMA_FROM_DEVICE, device_report_buf,
+				  DR_BUFFER_LEN, &sshdr, 30 * HZ, 3, NULL);
+
+	scsi_device_put(sdev);
+
+	if (err) {
+		pr_err("%s: read fail to get device report for lun0 err=%d\n", __func__, err);
+		if (scsi_sense_valid(&sshdr)) {
+			pr_err("%s: sshdr : response_code(%d)/sense_key(%d)/asc(%d)/ascq(%d)\n", __func__,
+				sshdr.response_code, sshdr.sense_key, sshdr.asc, sshdr.ascq);
+		}
+
+		goto out_free;
+	}
+
+	seq_printf(file,
+		"= = = = = = = = = = = = = = = = = = = = = = = = = = = = = =\n");
+
+	/* seems little endian */
+	for (i = 0; i < ARRAY_SIZE(device_report_field_name); ++i) {
+		u64 val = 0;
+
+		tmp = &device_report_field_name[i];
+
+		switch (tmp->width_byte) {
+			case BYTE:
+				val = (u8)device_report_buf[tmp->offset];
+				break;
+			case WORD:
+				val = (u16)get_unaligned_be16(&device_report_buf[tmp->offset]);
+				break;
+			case DWORD:
+				val = (u32)get_unaligned_be32(&device_report_buf[tmp->offset]);
+				break;
+			default:
+				break;
+		}
+
+		seq_printf(file,
+			"Micron Device Report : [Byte offset 0x%02x]: %s = 0x%llx\n",
+			tmp->offset,
+			tmp->name,
+			val);
+	}
+
+out_free:
+	if (device_report_buf)
+		kfree(device_report_buf);
+
+}
+
+static void ufsdbg_print_micron_device_report(struct seq_file *file, void *data)
+{
+	struct ufs_hba *hba = (struct ufs_hba *)file->private;
+	//1. Command descriptor block (CDB) for WRITE BUFFER
+	ufsdbg_print_micron_device_report_write(hba);
+	//2. CDB for READ BUFFER
+	ufsdbg_print_micron_device_report_read(file);
+}
+
+static void ufsdbg_print_wdc_device_report(struct seq_file *file, void *data)
+{
+	struct ufs_hba *hba = (struct ufs_hba *)file->private;
+	/* Sandisk : Device Report */
+	#define DR_BUFFER_MODE 0x1 // vendor-specific
+	#define DR_BUFFER_ID 0x1
+	#define DR_BUFFER_OFFSET_KEY 0x7D9C69
+	#define DR_BUFFER_LEN 512
+
+	struct desc_field_offset *tmp;
+	unsigned char cmd[16];
+	u8 *device_report_buf = 0;
+	int err = 0, i;
+	struct scsi_sense_hdr sshdr;
+	struct scsi_device *sdev = NULL;
+
+	struct desc_field_offset device_report_field_name[] = {
+		{"bAvgEraseCycle_TYPE_C(eSLC)",					0x00, DWORD},
+		{"bAvgEraseCycle_TYPE_A(SLC)",					0x04, DWORD},
+		{"bAvgEraseCycle_TYPE_B(TLC)",					0x08, DWORD},
+		{"bReadReclaim_Count_TYPE_C",					0x0C, DWORD},
+		{"bReadReclaim_Count_TYPE_A",					0x10, DWORD},
+		{"bReadReclaim_Count_TYPE_B",					0x14, DWORD},
+		{"bBadBlock_Manufactory",						0x18, DWORD},
+		{"bRuntime_Badblock_TYPE_C",					0x1C, DWORD},
+		{"bRuntime_Badblock_TYPE_A",					0x20, DWORD},
+		{"bRuntime_Badblock_TYPE_B",					0x24, DWORD},
+		{"bFieldFirmwareUpdateCount",					0x28, DWORD},
+		//--------------------------------------------------//
+		{"bFirmwareReleaseDate",						0x2C, BYTE_12},
+#if 1
+		{"bFirmwareReleaseDate_1",						0x2C, DWORD},
+		{"bFirmwareReleaseDate_2",						0x30, DWORD},
+		{"bFirmwareReleaseDate_3",						0x34, DWORD},
+#endif
+		//--------------------------------------------------//
+		{"bFirmwareReleaseTime",						0x38, LONG},
+		{"bCumulativeWrittenDataSize_100MB",			0x40, DWORD},
+		{"bCumulativeVCCDrops",							0x44, DWORD},
+		{"bCumulativeVCCDroops",						0x48, DWORD},
+		{"bNumFailureRecoverHostData(Abort)",			0x4C, DWORD},
+		{"bTotalRecoverVDet(VCCDroop)",					0x50, DWORD},
+		{"bCumulativeWrittenSmartSLC_100MB",			0x54, DWORD},
+		{"bCumulativeWrittenSmartSLC_100MB(BigFile)",	0x58, DWORD},
+		{"bNumOperateBigFileMode",						0x5C, DWORD},
+		{"bAvgEraseCycle(BigfileBuffer)",				0x60, DWORD},
+		{"bCumulativeInitCount",						0x64, DWORD},
+		{"bMaxEraseCycle_TYPE_C",						0x68, DWORD},
+		{"bMaxEraseCycle_TYPE_A",						0x6C, DWORD},
+		{"bMaxEraseCycle_TYPE_B",						0x70, DWORD},
+		{"bMinEraseCycle_TYPE_C",						0x74, DWORD},
+		{"bMinEraseCycle_TYPE_A",						0x78, DWORD},
+		{"bMinEraseCycle_TYPE_B",						0x7C, DWORD},
+		{"bReserved",									0x80, BYTE_24},
+		{"bPreEolWarningLevel_TYPE_C",					0x98, DWORD},
+		{"bPreEolWarningLevel_TYPE_B",					0x9C, DWORD},
+		{"bUECC_Count",									0xA0, DWORD},
+		{"bCurrentTemperature",							0xA4, DWORD},
+		{"bMinTemperature",								0xA8, DWORD},
+		{"bMaxTemperature",								0xAC, DWORD},
+		{"bReserved",									0xB0, DWORD},
+		{"bEnhancedHealth_TYPE_C",						0xB4, DWORD},
+		{"bEnhancedHealth_TYPE_B",						0xB8, DWORD},
+		{"bReserved",									0xBC, BYTE_3},
+		{"bCurrentPowerMode",							0xBF, BYTE},
+		{"bEnhancedHealth_TYPE_A",						0xC0, DWORD},
+		{"bPreEolWarningLevel_TYPE_A",					0xC4, DWORD},
+	};
+
+	device_report_buf = kzalloc(DR_BUFFER_LEN, GFP_KERNEL);
+	if (!device_report_buf)
+		return;
+
+	cmd[0] = READ_BUFFER;
+	cmd[1] = DR_BUFFER_MODE;
+	cmd[2] = DR_BUFFER_ID;
+
+	cmd[3] = DR_BUFFER_OFFSET_KEY >> 16;
+	cmd[4] = (DR_BUFFER_OFFSET_KEY >> 8) & 0xff;
+	cmd[5] = DR_BUFFER_OFFSET_KEY & 0xff;
+
+	cmd[6] = DR_BUFFER_LEN >> 16;
+	cmd[7] = (DR_BUFFER_LEN >> 8) & 0xff;
+	cmd[8] = DR_BUFFER_LEN & 0xff;
+	cmd[9] = 0;
+
+	/* seems all general LU have the same record, so targeting to LUN0 */
+	sdev = scsi_device_lookup(hba->sdev_ufs_device->host, 0, 0, 0);
+	if (!sdev) {
+		pr_err("%s: fail to get lun0 device\n", __func__);
+		kfree(device_report_buf);
+		return;
+	}
+
+	err = scsi_execute_req(sdev, cmd, DMA_FROM_DEVICE, device_report_buf,
+				  DR_BUFFER_LEN, &sshdr, 30 * HZ, 3, NULL);
+
+	scsi_device_put(sdev);
+	if (err) {
+		pr_err("%s: fail to get device report for lun0 err=%d\n", __func__, err);
+		if (scsi_sense_valid(&sshdr)) {
+			pr_err("%s: sshdr : response_code(%d)/sense_key(%d)/asc(%d)/ascq(%d)\n", __func__,
+				sshdr.response_code, sshdr.sense_key, sshdr.asc, sshdr.ascq);
+		}
+
+		goto out_free;
+	}
+
+	seq_printf(file,
+		"= = = = = = = = = = = = = = = = = = = = = = = = = = = = = =\n");
+
+	/* seems little endian */
+	for (i = 0; i < ARRAY_SIZE(device_report_field_name); ++i) {
+		u64 val = 0;
+		tmp = &device_report_field_name[i];
+		if ( !strcmp(tmp->name, "bFirmwareReleaseDate") || !strcmp(tmp->name, "bFirmwareReleaseTime") ) {
+			ufsdbg_print_ascii(file, "Sandisk Device Report", tmp, device_report_buf);
+			continue;
+		}
+
+		switch (tmp->width_byte) {
+			case BYTE:
+				val = (u8)device_report_buf[tmp->offset];
+				break;
+			case WORD:
+				val = (u16)get_unaligned_le16(&device_report_buf[tmp->offset]);
+				break;
+			case DWORD:
+				val = (u32)get_unaligned_le32(&device_report_buf[tmp->offset]);
+				break;
+			case LONG:
+				val = (u64)get_unaligned_le64(&device_report_buf[tmp->offset]);
+				break;
+			case BYTE_3:
+				break;
+			case BYTE_12:
+				val = (u64)get_unaligned_le64(&device_report_buf[tmp->offset]);
+				break;
+			case BYTE_24:
+				break;
+			default:
+				break;
+		}
+
+		seq_printf(file,
+			"Sandisk Device Report : [Byte offset 0x%02x]: %s = 0x%llx\n",
+			tmp->offset,
+			tmp->name,
+			val);
+	}
+
+out_free:
+	if (device_report_buf)
+		kfree(device_report_buf);
+}
+
+static void ufsdbg_print_toshiba_en_health_report(struct seq_file *file, void *data)
+{
+	/* Toshiba : Enhanced Device Health for Next UFS Memory - version 1.1 */
+	struct ufs_hba *hba = (struct ufs_hba *)file->private;
+	if (!hba->sdev_ufs_device->skip_vpd_pages) {
+
+		#define EN_HEALTH_VPD_SIZE 512
+		#define EN_HEALTH_VPD_PAGECODE 0xC0
+		#define EN_HEALTH_VPD_PASSCODE 0x1A
+		u8 *en_health_buf = 0;
+		int err = 0, i;
+		struct desc_field_offset *tmp;
+		unsigned char cmd[16];
+		struct scsi_sense_hdr sshdr;
+
+		struct desc_field_offset en_health_desc_field_name[] = {
+			{"bPeriphQualifier",		0x00, BYTE},
+			{"bPageCode",				0x01, BYTE},
+			{"bPageLength",				0x02, WORD},
+			{"bMaxEraseCnt_pSLC",		0x04, DWORD},
+			{"bMinEraseCnt_pSLC",		0x08, DWORD},
+			{"bAvgEraseCnt_pSLC",		0x0C, DWORD},
+			{"bMaxEraseCnt_MLC",		0x10, DWORD},
+			{"bMinEraseCnt_MLC",		0x14, DWORD},
+			{"bAvgEraseCnt_MLC",		0x18, DWORD},
+			{"bReadRefreshCnt",			0x1C, DWORD},
+			{"bReserved",				0x20, DWORD},
+			{"bRuntimeBadBlockCnt",		0x24, DWORD},
+			{"bReserved",				0x28, DWORD},
+			{"bCumulativeInitCnt",		0x2C, DWORD},
+			{"bCumulativeWrittenDataSize_100MB",	0x30, DWORD},
+			{"bPatchTrialCnt",			0x34, DWORD},
+			{"bPatchSuccessCnt",		0x38, DWORD},
+			{"bPatchReleaseDate",		0x3C, DWORD},
+			{"bCumulativeReadDataSize_100MB",		0x40, LONG},
+			{"bReserved",				0x48, DWORD},
+			{"bUECCCnt",				0x4C, DWORD},
+			{"bReserved",				0x50, LONG},
+			{"bSuddenPowerdownCnt",		0x58, DWORD},
+			{"bReserved",				0x5C, BYTE},
+		};
+
+		en_health_buf = kzalloc(EN_HEALTH_VPD_SIZE, GFP_KERNEL);
+		if (!en_health_buf)
+			return;
+
+		/* referencing scsi_vpd_inquiry() */
+		cmd[0] = INQUIRY;
+		cmd[1] = 1;		/* EVPD */
+		cmd[1] |= (EN_HEALTH_VPD_PASSCODE << 2); /* fill in the reserved aread of cmd[1] */
+		cmd[2] = EN_HEALTH_VPD_PAGECODE;
+		cmd[3] = EN_HEALTH_VPD_SIZE >> 8;
+		cmd[4] = EN_HEALTH_VPD_SIZE & 0xff;
+		cmd[5] = 0;		/* Control byte */
+
+		/*
+		 * I'm not convinced we need to try quite this hard to get VPD, but
+		 * all the existing users tried this hard.
+		 */
+		/*
+		 * This command can be executed to all LUs including Well-known LUs.
+		 * just simply issue to W-LU
+		 */
+		err = scsi_execute_req(hba->sdev_ufs_device, cmd, DMA_FROM_DEVICE, en_health_buf,
+					  EN_HEALTH_VPD_SIZE, &sshdr, 30 * HZ, 3, NULL);
+		if (err) {
+			pr_err("%s: fail to get e-health vpd page err=%d\n", __func__, err);
+			if (scsi_sense_valid(&sshdr)) {
+				pr_err("%s: sshdr : response_code(%d)/sense_key(%d)/asc(%d)/ascq(%d)\n", __func__,
+					sshdr.response_code, sshdr.sense_key, sshdr.asc, sshdr.ascq);
+			}
+			goto out_free;
+		}
+
+		/* Sanity check that we got the page back that we asked for */
+		if (en_health_buf[1] != EN_HEALTH_VPD_PAGECODE)
+			goto out_free;
+
+		if (!err) {
+			seq_printf(file,
+				"= = = = = = = = = = = = = = = = = = = = = = = = = = = = = =\n");
+
+			for (i = 0; i < ARRAY_SIZE(en_health_desc_field_name); ++i) {
+				u64 val = 0;
+				tmp = &en_health_desc_field_name[i];
+				switch (tmp->width_byte) {
+					case BYTE:
+						val = (u8)en_health_buf[tmp->offset];
+						break;
+					case WORD:
+						val = (u16)get_unaligned_be16(&en_health_buf[tmp->offset]);
+						break;
+					case DWORD:
+						val = (u32)get_unaligned_be32(&en_health_buf[tmp->offset]);
+						break;
+					case LONG:
+						val = (u64)get_unaligned_be64(&en_health_buf[tmp->offset]);
+						break;
+					default:
+						break;
+				}
+
+				seq_printf(file,
+					"Toshiba Enhanced HEALTH DESCRIPTOR [Byte offset 0x%02x]: %s = 0x%llx\n",
+					tmp->offset,
+					tmp->name,
+					val);
+			}
+		}
+out_free:
+		if (en_health_buf)
+			kfree(en_health_buf);
+	}
+}
+
+static void ufsdbg_dump_en_health_report(struct seq_file *file, void *data) {
+
+	struct ufs_hba *hba = (struct ufs_hba *)file->private;
+
+	if (hba->dev_info.w_manufacturer_id == UFS_VENDOR_TOSHIBA) {
+		ufsdbg_print_toshiba_en_health_report(file, data);
+	} else if (hba->dev_info.w_manufacturer_id == UFS_VENDOR_WDC) {
+		ufsdbg_print_wdc_device_report(file, data);
+	}else if(hba->dev_info.w_manufacturer_id == UFS_VENDOR_MICRON){
+		ufsdbg_print_micron_device_report(file, data);
+	}else if(hba->dev_info.w_manufacturer_id == UFS_VENDOR_SAMSUNG){
+		ufsdbg_print_samsung_device_report(file, data);
+	}
+}
+
+static int ufsdbg_dump_health_desc_show(struct seq_file *file, void *data)
+{
+	int err = 0, i;
+	int buff_len = QUERY_DESC_HEALTH_DEF_SIZE;
+	u8 desc_buf[QUERY_DESC_HEALTH_DEF_SIZE];
+	struct ufs_hba *hba = (struct ufs_hba *)file->private;
+	struct desc_field_offset *tmp;
+
+	struct desc_field_offset health_desc_field_name[] = {
+		{"bLength",			0x00, BYTE},
+		{"bDescriptorIDN",		0x01, BYTE},
+		{"bPreEOLInfo",		0x02, BYTE},
+		{"bDeviceLifeTimeEstA",	0x03, BYTE},
+		{"bDeviceLifeTimeEstB",		0x04, BYTE},
+	};
+
+	pm_runtime_get_sync(hba->dev);
+	err = ufshcd_read_health_desc(hba, desc_buf, buff_len);
+	pm_runtime_put_sync(hba->dev);
+
+	if(!err) {
+		for (i = 0; i < ARRAY_SIZE(health_desc_field_name); ++i){
+			tmp = & health_desc_field_name[i];
+			seq_printf(file,
+					"HEALTH DESCRIPTOR Descriptor[Byte offset 0x%x]: %s = 0x%x\n",
+					tmp->offset,
+					tmp->name,
+					array_to_hex_val(&desc_buf[tmp->offset], tmp->width_byte));
+		}
+	} else {
+		seq_printf(file, "HEALTH DESCRIPTOR Descriptor failed. err = %d\n",
+				err);
+	}
+
+	ufsdbg_dump_en_health_report(file, data);
+
+	return err;
+}
+
+static int ufsdbg_dump_string_desc_show(struct seq_file *file, void *data)
+{
+	int err=0;
+	struct ufs_hba *hba = (struct ufs_hba *)file->private;
+	int i;
+	u8 index;
+	u8 str_desc_buf[QUERY_DESC_STRING_MAX_SIZE + 1];
+	u8 desc_buf[QUERY_DESC_DEVICE_DEF_SIZE];
+	u8 get_str_buf[QUERY_DESC_STRING_MAX_SIZE + 1];
+	char *str_name[4] = {"Manufacturer Name", "Product Name", "Serial Number", "Oem ID"};
+
+	pm_runtime_get_sync(hba->dev);
+	err = ufshcd_read_device_desc(hba, desc_buf,
+			QUERY_DESC_DEVICE_DEF_SIZE);
+	pm_runtime_put_sync(hba->dev);
+
+	if (err){
+		seq_printf(file, "Reading Device Descriptor failed. err =%d\n", err);
+		goto out;
+	}
+
+
+	for (i=0; i<4; i++) {
+		index = desc_buf[DEVICE_DESC_PARAM_MANF_NAME+i];
+		memset(str_desc_buf, 0, QUERY_DESC_STRING_MAX_SIZE);
+		memset(get_str_buf, 0, QUERY_DESC_DEVICE_DEF_SIZE);
+		pm_runtime_get_sync(hba->dev);
+		err = ufshcd_read_string_desc(hba, index, str_desc_buf,
+				QUERY_DESC_STRING_MAX_SIZE, true);
+		pm_runtime_put_sync(hba->dev);
+		if (err) {
+			seq_printf(file, "Reading String Descriptor failed. err =%d\n", err);
+			goto out;
+		}
+		str_desc_buf[QUERY_DESC_STRING_MAX_SIZE] = '\0';
+		strlcpy(get_str_buf, (str_desc_buf + QUERY_DESC_HDR_SIZE),
+				(QUERY_DESC_STRING_MAX_SIZE - QUERY_DESC_HDR_SIZE));
+		get_str_buf[QUERY_DESC_DEVICE_DEF_SIZE - QUERY_DESC_HDR_SIZE] = '\0';
+		seq_printf(file,
+				"String Descriptor[%d. %s]: %s\n", i+1, str_name[i], get_str_buf);
+	}
+
+out:
+	return err;
+}
+
+static int ufsdbg_dump_config_desc_show(struct seq_file *file, void *data)
+{
+	int err = 0, i, j, offset, s_offset;
+	int buff_len = QUERY_DESC_CONFIGURATION_DEF_SIZE;
+	u8 config_buf[QUERY_DESC_CONFIGURATION_DEF_SIZE];
+	struct ufs_hba *hba = (struct ufs_hba *)file->private;
+	struct desc_field_offset *tmp;
+	u8 desc_buf[QUERY_DESC_DEVICE_DEF_SIZE];
+	struct desc_field_offset config_device_field_name[] = {
+		{"bLength",			0x00, BYTE},
+		{"bDescriptorType",		0x01, BYTE},
+		{"bBootEnable",			0x03, BYTE},
+		{"bDescrAccessEn",		0x04, BYTE},
+		{"bInitPowerMode",		0x05, BYTE},
+		{"bHighPriorityLUN",		0x06, BYTE},
+		{"bSecureRemovalType",		0x07, BYTE},
+		{"bInitActiveICCLevel",		0x08, BYTE},
+		{"wPeriodicRTCUpdate",		0x09, WORD},
+	};
+
+	struct desc_field_offset config_unit_field_name[] = {
+		{"bLUEnable",			0x00, BYTE},
+		{"bBootLunID",			0x01, BYTE},
+		{"bLUWriteProtect",		0x02, BYTE},
+		{"bMemoryType",			0x03, BYTE},
+		{"dNumAllocUnits",		0x04, DWORD},
+		{"bDataReliability",		0x08, BYTE},
+		{"bLogicalBlockSize",		0x09, BYTE},
+		{"bProvisioningType",		0x0A, BYTE},
+		{"wContextCapabilities",	0x0B, WORD},
+	};
+
+	pm_runtime_get_sync(hba->dev);
+	err = ufshcd_read_device_desc(hba, desc_buf,
+			QUERY_DESC_DEVICE_DEF_SIZE);
+	pm_runtime_put_sync(hba->dev);
+
+	if (err){
+		seq_printf(file, "Reading Device Descriptor failed. err =%d\n", err);
+		goto out;
+	}
+
+	pm_runtime_get_sync(hba->dev);
+	err = ufshcd_read_config_desc(hba, config_buf, buff_len);
+	pm_runtime_put_sync(hba->dev);
+
+	if(!err) {
+		for (i=0; i<ARRAY_SIZE(config_device_field_name); ++i){
+			tmp = &config_device_field_name[i];
+			seq_printf(file,
+					"Config head and Device configurable parameters[Byte offset 0x%x]: %s = 0x%x\n",
+					tmp->offset,
+					tmp->name,
+					array_to_hex_val(&config_buf[tmp->offset], tmp->width_byte));
+		}
+		for (i=0; i<8; i++){
+			s_offset = desc_buf[DEVICE_DESC_PARAM_UD_OFFSET] + i*desc_buf[DEVICE_DESC_PARAM_UD_LEN];
+			for (j=0; j<ARRAY_SIZE(config_unit_field_name); ++j){
+				tmp = &config_unit_field_name[j];
+				offset = s_offset + tmp->offset;
+				seq_printf(file,
+						"Unit Descriptor %d configurable parameters[Byte offset 0x%x]: %s = 0x%x\n",
+						i,
+						offset,
+						tmp->name,
+						array_to_hex_val(&config_buf[offset], tmp->width_byte));
+			}
+		}
+	} else {
+		seq_printf(file, "Reading Configuration Descriptor failed. err = %d\n",
+				err);
+	}
+
+out:
+	return err;
+}
+static int ufsdbg_dump_unit_desc_show(struct seq_file *file, void *data)
+{
+	int err = 0, i, j;
+	int buff_len = QUERY_DESC_UNIT_DEF_SIZE;
+	u8 unit_buf[QUERY_DESC_UNIT_DEF_SIZE];
+	struct ufs_hba *hba = (struct ufs_hba *)file->private;
+	struct desc_field_offset *tmp;
+
+	struct desc_field_offset unit_desc_field_name[] = {
+		{"bLength",			0x00, BYTE},
+		{"bDescriptorType",		0x01, BYTE},
+		{"bUnitIndex",			0x02, BYTE},
+		{"bLUEnable",			0x03, BYTE},
+		{"bBootLunID",			0x04, BYTE},
+		{"bLUWriteProtect",		0x05, BYTE},
+		{"bLUQueueDepth",		0x06, BYTE},
+		{"bMemoryType",			0x08, BYTE},
+		{"bDataReliability",		0x09, BYTE},
+		{"bLogicalBlockSize",		0x0A, BYTE},
+		{"qLogicalBlockCount",		0x0B, LONG},
+		{"qEraseBlockSize",		0x13, DWORD},
+		{"bProvisioningType",		0x17, BYTE},
+		{"qPhyMemResourceCount",	0x18, LONG},
+		{"wContextCapabilities",	0x20, WORD},
+		{"bLargeUnitGranularity_M1",	0x22, BYTE},
+	};
+	struct desc_field_offset unit_rpmb_desc_field_name[] = {
+		{"bLength",			0x00, BYTE},
+		{"bDescriptorType",		0x01, BYTE},
+		{"bUnitIndex",			0x02, BYTE},
+		{"bLUEnable",			0x03, BYTE},
+		{"bBootLunID",			0x04, BYTE},
+		{"bLUWriteProtect",		0x05, BYTE},
+		{"bLUQueueDepth",		0x06, BYTE},
+		{"bMemoryType",			0x08, BYTE},
+		{"bLogicalBlockSize",		0x0A, BYTE},
+		{"qLogicalBlockCount",		0x0B, LONG},
+		{"qEraseBlockSize",		0x13, DWORD},
+		{"bProvisioningType",		0x17, BYTE},
+		{"qPhyMemResourceCount",	0x18, LONG},
+	};
+
+	/* 1. Unit Descriptor */
+	for(i=0; i<8; i++){
+		pm_runtime_get_sync(hba->dev);
+		err = ufshcd_read_unit_desc(hba, i, unit_buf, buff_len);
+		pm_runtime_put_sync(hba->dev);
+		if (err) {
+			seq_printf(file,
+					"Reading %d UNIT Descriptor failed. err = %d\n", i, err);
+			goto out;
+		}
+		for(j=0; j<ARRAY_SIZE(unit_desc_field_name); ++j) {
+			tmp = &unit_desc_field_name[j];
+			seq_printf(file,
+					"%d UNIT Descriptor[Byte offset 0x%x]: %s = 0x%x\n",
+					i,
+					tmp->offset,
+					tmp->name,
+					array_to_hex_val(&unit_buf[tmp->offset], tmp->width_byte));
+		}
+	}
+
+	/* 2. RPMB Unit Descriptor */
+	pm_runtime_get_sync(hba->dev);
+	err = ufshcd_read_unit_desc(hba, 0xC4, unit_buf, buff_len);
+	pm_runtime_put_sync(hba->dev);
+	if (err) {
+		seq_printf(file,
+				"Reading RPMB UNIT Descriptor failed. err = %d\n", err);
+		goto out;
+	}
+	for(i=0; i<ARRAY_SIZE(unit_rpmb_desc_field_name); ++i) {
+		tmp = &unit_desc_field_name[i];
+		if (tmp->offset >= hba->desc_size.unit_desc)
+			break;
+
+		seq_printf(file,
+				"RPMB UNIT Descriptor[Byte offset 0x%x]: %s = 0x%x\n",
+				tmp->offset,
+				tmp->name,
+				array_to_hex_val(&unit_buf[tmp->offset], tmp->width_byte));
+	}
+out:
+	return err;
+
+}
+
+static int ufsdbg_dump_inter_desc_show(struct seq_file *file, void *data)
+{
+	int err = 0, i;
+	int buff_len = QUERY_DESC_INTERCONNECT_DEF_SIZE;
+	u8 inter_desc_buf[QUERY_DESC_INTERCONNECT_DEF_SIZE];
+	struct ufs_hba *hba = (struct ufs_hba *)file->private;
+	struct desc_field_offset *tmp;
+
+	struct desc_field_offset inter_desc_field_name[] = {
+		{"bLength",			0x00, BYTE},
+		{"bDescriptorType",		0x01, BYTE},
+		{"bcdUniProVersion",		0x02, WORD},
+		{"bcdMphyVersion",		0x04, WORD},
+	};
+
+	pm_runtime_get_sync(hba->dev);
+	err = ufshcd_read_inter_desc(hba, inter_desc_buf, buff_len);
+	pm_runtime_put_sync(hba->dev);
+
+	if(!err) {
+		for (i=0; i<ARRAY_SIZE(inter_desc_field_name); ++i) {
+			tmp = &inter_desc_field_name[i];
+			seq_printf(file,
+					"Interconnect Descriptor[Byte offset 0x%x]: %s = 0x%x\n",
+					tmp->offset,
+					tmp->name,
+					array_to_hex_val(&inter_desc_buf[tmp->offset], tmp->width_byte));
+		}
+	} else {
+		seq_printf(file, "Reading Interconnect Descriptor failed. err = %d\n", err);
+	}
+	return err;
+}
+
+static int ufsdbg_dump_power_desc_show(struct seq_file *file, void *data)
+{
+	int err = 0, i;
+	int buff_len = QUERY_DESC_POWER_DEF_SIZE;
+	u8 power_desc_buf[QUERY_DESC_POWER_DEF_SIZE];
+	struct ufs_hba *hba = (struct ufs_hba *)file->private;
+	struct desc_field_offset *tmp;
+
+	struct desc_field_offset power_desc_field_name[] = {
+		{"bLength",			0x00, BYTE},
+		{"bDescriptorType",		0x01, BYTE},
+		{"wActiveICCLevelsVCC",		0x02, 32},
+		{"wActiveICCLevelsVCCQ",	0x22, 32},
+		{"wActiveICCLevelsVCCQ2",	0x42, 32},
+	};
+
+	pm_runtime_get_sync(hba->dev);
+	err = ufshcd_read_power_desc(hba, power_desc_buf, buff_len);
+	pm_runtime_put_sync(hba->dev);
+
+	if(!err) {
+		for (i=0; i<ARRAY_SIZE(power_desc_field_name); ++i) {
+			tmp = &power_desc_field_name[i];
+			seq_printf(file,
+					"Power Parameters Descriptor[Byte offset 0x%x]: %s = 0x%x\n",
+					tmp->offset,
+					tmp->name,
+					array_to_hex_val(&power_desc_buf[tmp->offset], tmp->width_byte));
+		}
+	} else {
+		seq_printf(file, "Reading Power Parameters Descriptor failed. err = %d\n", err);
+	}
+	return err;
+}
+#endif
+
+#ifdef CONFIG_LFS_UFS
+static void ufsdbg_check_and_print_string_desc(struct seq_file *file, struct ufs_hba *hba, const char* name, int value) {
+	int err = 0, i;
+	char *str_name[5] = {"iManufactureName", "iProductName", "iSerialNumber", "iOemID", "iProductRevisionLevel"};
+	for (i = 0; i < (sizeof(str_name)/sizeof(str_name[0])); ++i) {
+		if (strncmp(str_name[i], name, strlen(str_name[i]))==0) {
+			u8 str_desc_buf[QUERY_DESC_STRING_MAX_SIZE + 1] = { 0, };
+
+			pm_runtime_get_sync(hba->dev);
+			err = ufshcd_read_string_desc(hba, value, str_desc_buf,
+					QUERY_DESC_STRING_MAX_SIZE, true);
+			pm_runtime_put_sync(hba->dev);
+			if (err) {
+				seq_printf(file, "Reading String Descriptor failed. err =%d\n", err);
+				return;
+			}
+
+			str_desc_buf[QUERY_DESC_STRING_MAX_SIZE] = '\0';
+			seq_printf(file,
+					"\t String Descriptor for [%s]: %s\n",
+					name, str_desc_buf+QUERY_DESC_HDR_SIZE);
+		}
+	}
+
+}
+
+static int ufsdbg_dump_device_desc_show(struct seq_file *file, void *data)
+{
+	int err = 0, i;
+	int buff_len = QUERY_DESC_DEVICE_DEF_SIZE;
+	u8 desc_buf[QUERY_DESC_DEVICE_DEF_SIZE];
+	struct ufs_hba *hba = (struct ufs_hba *)file->private;
+	struct desc_field_offset *tmp;
+
+	struct desc_field_offset device_desc_field_name[] = {
+		{"bLength",		0x00, BYTE},
+		{"bDescriptorType",	0x01, BYTE},
+		{"bDevice",		0x02, BYTE},
+		{"bDeviceClass",	0x03, BYTE},
+		{"bDeviceSubClass",	0x04, BYTE},
+		{"bProtocol",		0x05, BYTE},
+		{"bNumberLU",		0x06, BYTE},
+		{"bNumberWLU",		0x07, BYTE},
+		{"bBootEnable",		0x08, BYTE},
+		{"bDescrAccessEn",	0x09, BYTE},
+		{"bInitPowerMode",	0x0A, BYTE},
+		{"bHighPriorityLUN",	0x0B, BYTE},
+		{"bSecureRemovalType",	0x0C, BYTE},
+		{"bSecurityLU",		0x0D, BYTE},
+		{"Reserved",		0x0E, BYTE},
+		{"bInitActiveICCLevel",	0x0F, BYTE},
+		{"wSpecVersion",	0x10, WORD},
+		{"wManufactureDate",	0x12, WORD},
+		{"iManufactureName",	0x14, BYTE},
+		{"iProductName",	0x15, BYTE},
+		{"iSerialNumber",	0x16, BYTE},
+		{"iOemID",		0x17, BYTE},
+		{"wManufactureID",	0x18, WORD},
+		{"bUD0BaseOffset",	0x1A, BYTE},
+		{"bUDConfigPLength",	0x1B, BYTE},
+		{"bDeviceRTTCap",	0x1C, BYTE},
+		{"wPeriodicRTCUpdate",	0x1D, WORD},
+		{"bUFSFeaturesSupport", 0x1F, BYTE},
+		{"bFFUTimeout", 0x20, BYTE},
+		{"bQueueDepth", 0x21, BYTE},
+		{"wDeviceVersion", 0x22, WORD},
+		{"bNumSecureWPArea", 0x24, BYTE},
+		{"dPSAMaxDataSize", 0x25, DWORD},
+		{"bPSAStateTimeout", 0x29, BYTE},
+		{"iProductRevisionLevel", 0x2A, BYTE},
+	};
+
+	pm_runtime_get_sync(hba->dev);
+	err = ufshcd_read_device_desc(hba, desc_buf, buff_len);
+	pm_runtime_put_sync(hba->dev);
+
+	if (!err) {
+		for (i = 0; i < ARRAY_SIZE(device_desc_field_name); ++i) {
+			tmp = &device_desc_field_name[i];
+			seq_printf(file,
+					"Device Descriptor[Byte offset 0x%x]: %s = 0x%x\n",
+					tmp->offset,
+					tmp->name,
+					array_to_hex_val(&desc_buf[tmp->offset], tmp->width_byte));
+
+			ufsdbg_check_and_print_string_desc(file, hba, tmp->name, array_to_hex_val(&desc_buf[tmp->offset], tmp->width_byte));
+		}
+	} else {
+		seq_printf(file, "Reading Device Descriptor failed. err = %d\n",
+			   err);
+	}
+
+	return err;
+}
+
+#else
 static int ufsdbg_dump_device_desc_show(struct seq_file *file, void *data)
 {
 	int err = 0;
@@ -943,7 +2159,7 @@ static int ufsdbg_dump_device_desc_show(struct seq_file *file, void *data)
 
 	return err;
 }
-
+#endif
 static int ufsdbg_show_hba_show(struct seq_file *file, void *data)
 {
 	struct ufs_hba *hba = (struct ufs_hba *)file->private;
@@ -1045,6 +2261,84 @@ static const struct file_operations ufsdbg_dump_device_desc = {
 	.read		= seq_read,
 };
 
+#ifdef CONFIG_LFS_UFS
+static int ufsdbg_dump_geo_desc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file,
+			ufsdbg_dump_geo_desc_show, inode->i_private);
+}
+
+static const struct file_operations ufsdbg_dump_geo_desc = {
+	.open		= ufsdbg_dump_geo_desc_open,
+	.read		= seq_read,
+};
+
+static int ufsdbg_dump_string_desc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file,
+			ufsdbg_dump_string_desc_show, inode->i_private);
+}
+
+static const struct file_operations ufsdbg_dump_string_desc = {
+	.open		= ufsdbg_dump_string_desc_open,
+	.read		= seq_read,
+};
+
+static int ufsdbg_dump_config_desc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file,
+			ufsdbg_dump_config_desc_show, inode->i_private);
+}
+
+static const struct file_operations ufsdbg_dump_config_desc = {
+	.open		= ufsdbg_dump_config_desc_open,
+	.read		= seq_read,
+};
+
+static int ufsdbg_dump_unit_desc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file,
+			ufsdbg_dump_unit_desc_show, inode->i_private);
+}
+
+static const struct file_operations ufsdbg_dump_unit_desc = {
+	.open		= ufsdbg_dump_unit_desc_open,
+	.read		=seq_read,
+};
+
+static int ufsdbg_dump_inter_desc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file,
+			ufsdbg_dump_inter_desc_show, inode->i_private);
+}
+
+static const struct file_operations ufsdbg_dump_inter_desc = {
+	.open		= ufsdbg_dump_inter_desc_open,
+	.read		=seq_read,
+};
+
+static int ufsdbg_dump_power_desc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file,
+			ufsdbg_dump_power_desc_show, inode->i_private);
+}
+
+static const struct file_operations ufsdbg_dump_power_desc = {
+	.open		= ufsdbg_dump_power_desc_open,
+	.read		=seq_read,
+};
+
+static int ufsdbg_dump_health_desc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file,
+			ufsdbg_dump_health_desc_show, inode->i_private);
+}
+
+static const struct file_operations ufsdbg_dump_health_desc = {
+	.open		= ufsdbg_dump_health_desc_open,
+	.read		= seq_read,
+};
+#endif
 static int ufsdbg_power_mode_show(struct seq_file *file, void *data)
 {
 	struct ufs_hba *hba = (struct ufs_hba *)file->private;
@@ -1644,6 +2938,77 @@ void ufsdbg_add_debugfs(struct ufs_hba *hba)
 			"%s:  NULL dump_device_desc file, exiting\n", __func__);
 		goto err;
 	}
+#ifdef CONFIG_LFS_UFS
+	hba->debugfs_files.dump_geo_desc =
+		debugfs_create_file("dump_geo_desc", S_IRUSR,
+				hba->debugfs_files.debugfs_root, hba,
+				&ufsdbg_dump_geo_desc);
+	if(!hba->debugfs_files.dump_geo_desc){
+		dev_err(hba->dev,
+			"%s:  NULL dump_geo_desc file, exiting", __func__);
+		goto err;
+	}
+
+	hba->debugfs_files.dump_string_desc =
+		debugfs_create_file("dump_string_desc", S_IRUSR,
+				hba->debugfs_files.debugfs_root, hba,
+				&ufsdbg_dump_string_desc);
+	if(!hba->debugfs_files.dump_string_desc){
+	       dev_err(hba->dev,
+		       "%s:  NULL dump_string_desc file, exiting", __func__);
+	       goto err;
+	}
+
+	hba->debugfs_files.dump_config_desc =
+		debugfs_create_file("dump_config_desc", S_IRUSR,
+				hba->debugfs_files.debugfs_root, hba,
+				&ufsdbg_dump_config_desc);
+	if(!hba->debugfs_files.dump_config_desc){
+		dev_err(hba->dev,
+			"%s:  NULL dump_config_desc file, exiting", __func__);
+		goto err;
+	}
+
+	hba->debugfs_files.dump_unit_desc =
+		debugfs_create_file("dump_unit_desc", S_IRUSR,
+				hba->debugfs_files.debugfs_root, hba,
+				&ufsdbg_dump_unit_desc);
+	if(!hba->debugfs_files.dump_unit_desc){
+		dev_err(hba->dev,
+			"%s:  NULL dump_unit_desc file, exiting", __func__);
+		goto err;
+	}
+
+	hba->debugfs_files.dump_inter_desc =
+		debugfs_create_file("dump_inter_desc", S_IRUSR,
+				hba->debugfs_files.debugfs_root, hba,
+				&ufsdbg_dump_inter_desc);
+	if(!hba->debugfs_files.dump_inter_desc){
+		dev_err(hba->dev,
+			"%s:  NULL dump_inter_desc file, exiting", __func__);
+		goto err;
+	}
+
+	hba->debugfs_files.dump_power_desc =
+		debugfs_create_file("dump_power_desc", S_IRUSR,
+				hba->debugfs_files.debugfs_root, hba,
+				&ufsdbg_dump_power_desc);
+	if(!hba->debugfs_files.dump_power_desc){
+		dev_err(hba->dev,
+			"%s:  NULL dump_power_desc file, exiting", __func__);
+		goto err;
+	}
+
+	hba->debugfs_files.dump_health_desc =
+		debugfs_create_file("dump_health_desc", S_IRUSR,
+				hba->debugfs_files.debugfs_root, hba,
+				&ufsdbg_dump_health_desc);
+	if(!hba->debugfs_files.dump_health_desc){
+		dev_err(hba->dev,
+			"%s:  NULL dump_health_desc file, exiting", __func__);
+		goto err;
+	}
+#endif
 
 	hba->debugfs_files.power_mode =
 		debugfs_create_file("power_mode", 0600,

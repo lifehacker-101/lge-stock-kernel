@@ -2225,6 +2225,12 @@ int ipa3_enable_gsi_wdi_pipe(u32 clnt_hdl)
 		return -EPERM;
 	}
 
+	if (IPA_CLIENT_IS_CONS(ep->client)) {
+		memset(&holb_cfg, 0, sizeof(holb_cfg));
+		holb_cfg.en = IPA_HOLB_TMR_DIS;
+		holb_cfg.tmr_val = 0;
+		ipa3_cfg_ep_holb(clnt_hdl, &holb_cfg);
+	}
 	IPA_ACTIVE_CLIENTS_INC_EP(ipa3_get_client_mapping(clnt_hdl));
 
 	memset(&ep_cfg_ctrl, 0, sizeof(struct ipa_ep_cfg_ctrl));

@@ -144,6 +144,9 @@ enum ufs_desc_def_size {
 	QUERY_DESC_GEOMETRY_DEF_SIZE		= 0x48,
 	QUERY_DESC_POWER_DEF_SIZE		= 0x62,
 	QUERY_DESC_HEALTH_DEF_SIZE		= 0x25,
+#ifdef CONFIG_LFS_UFS
+	QUERY_DESC_STRING_MAX_SIZE      = 0xFE,
+#endif
 };
 
 /* Unit descriptor parameters offsets in bytes*/
@@ -258,6 +261,9 @@ enum geometry_desc_param {
 	GEOMETRY_DESC_PARAM_WB_BUFF_CAP_ADJ	= 0x54,
 	GEOMETRY_DESC_PARAM_WB_SUP_RED_TYPE	= 0x55,
 	GEOMETRY_DESC_PARAM_WB_SUP_WB_TYPE	= 0x56,
+#if defined(CONFIG_UFSTW)
+	GEOMETRY_DESC_TW_GROUP_NUM_CAP			= 0x57,
+#endif
 };
 
 /* Health descriptor parameters offsets in bytes*/
@@ -310,6 +316,9 @@ enum power_desc_param_offset {
 enum {
 	MASK_EE_STATUS		= 0xFFFF,
 	MASK_EE_URGENT_BKOPS	= (1 << 2),
+#if defined(CONFIG_UFSTW)
+	MASK_EE_TW		= (1 << 5),
+#endif
 };
 
 /* Background operation status */

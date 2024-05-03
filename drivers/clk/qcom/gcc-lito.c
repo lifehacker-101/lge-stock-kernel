@@ -28,6 +28,10 @@
 #include "reset.h"
 #include "vdd-level-lito.h"
 
+#if defined(CONFIG_LFS_MMC) && (defined(CONFIG_MACH_LITO_CAYMANLM) || defined(CONFIG_MACH_LITO_ACELM))
+#include <soc/qcom/lge/board_lge.h>
+#endif
+
 #define GCC_NPU_MISC				0x4d110
 #define GCC_GPU_MISC				0x71028
 
@@ -703,6 +707,18 @@ static const struct freq_tbl ftbl_gcc_sdcc2_apps_clk_src[] = {
 	F(202000000, P_GPLL9_OUT_MAIN, 4, 0, 0),
 	{ }
 };
+
+#if defined(CONFIG_LFS_MMC) && (defined(CONFIG_MACH_LITO_CAYMANLM) || defined(CONFIG_MACH_LITO_ACELM))
+static const struct freq_tbl ftbl_gcc_sdcc2_apps_clk_src_limit_max[] = {
+	F(400000, P_BI_TCXO, 12, 1, 4),
+	F(19200000, P_BI_TCXO, 1, 0, 0),
+	F(25000000, P_GPLL0_OUT_EVEN, 6, 1, 2),
+	F(50000000, P_GPLL0_OUT_EVEN, 6, 0, 0),
+	F(100000000, P_GPLL0_OUT_EVEN, 3, 0, 0),
+	F(202000000, P_GPLL9_OUT_MAIN, 4.5, 0, 0),
+	{ }
+};
+#endif
 
 static struct clk_rcg2 gcc_sdcc2_apps_clk_src = {
 	.cmd_rcgr = 0x1400c,
@@ -2646,6 +2662,17 @@ static const struct of_device_id gcc_lito_match_table[] = {
 };
 MODULE_DEVICE_TABLE(of, gcc_lito_match_table);
 
+#if defined(CONFIG_LFS_MMC) && (defined(CONFIG_MACH_LITO_CAYMANLM) || defined(CONFIG_MACH_LITO_ACELM))
+static void gcc_sm7250_sdcc2_clk_fixup(void)
+{
+	if (lge_get_sku_carrier() != HW_SKU_NA_CDMA_VZW) {
+		printk("fixup sdcc2 clock\n");
+		gcc_sdcc2_apps_clk_src.freq_tbl =
+			ftbl_gcc_sdcc2_apps_clk_src_limit_max;
+	}
+}
+#endif
+
 static int gcc_lito_probe(struct platform_device *pdev)
 {
 	struct regmap *regmap;
@@ -2670,6 +2697,10 @@ static int gcc_lito_probe(struct platform_device *pdev)
 				"Unable to get vdd_cx_ao regulator\n");
 		return PTR_ERR(vdd_cx_ao.regulator[0]);
 	}
+
+#if defined(CONFIG_LFS_MMC) && (defined(CONFIG_MACH_LITO_CAYMANLM) || defined(CONFIG_MACH_LITO_ACELM))
+	gcc_sm7250_sdcc2_clk_fixup();
+#endif
 
 	ret = qcom_cc_register_rcg_dfs(regmap, gcc_dfs_clocks,
 			ARRAY_SIZE(gcc_dfs_clocks));

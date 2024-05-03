@@ -50,7 +50,9 @@
 #include "ufs-sysfs.h"
 #include "ufs-debugfs.h"
 #include "ufs-qcom.h"
-
+#ifdef CONFIG_LFS_UFS
+#include "ufsdbg-print.h"
+#endif
 static bool ufshcd_wb_sup(struct ufs_hba *hba);
 static int ufshcd_wb_ctrl(struct ufs_hba *hba, bool enable);
 static int ufshcd_wb_buf_flush_enable(struct ufs_hba *hba);
@@ -423,11 +425,27 @@ static inline bool ufshcd_is_valid_pm_lvl(int lvl)
 
 static struct ufs_dev_fix ufs_fixups[] = {
 	/* UFS cards deviations table */
+#ifdef CONFIG_LFS_UFS
+	/* Toshiba recommend that we should not use FASTAUTO in Toshiba-UFS-Gen3.
+	 */
+	UFS_FIX(UFS_VENDOR_TOSHIBA, "THGLF2G8J4LBATR", UFS_DEVICE_NO_FASTAUTO),
+	/* HOST got numerous NAC on some SAMSUNG UFS */
+	UFS_FIX(UFS_VENDOR_SAMSUNG, UFS_ANY_MODEL,
+		UFS_DEVICE_QUIRK_RECOVERY_FROM_DL_NAC_ERRORS),
+	UFS_FIX(UFS_VENDOR_MICRON, UFS_ANY_MODEL,
+		UFS_DEVICE_QUIRK_NO_LINK_OFF),
+	UFS_FIX(UFS_VENDOR_MICRON, UFS_ANY_MODEL,
+		UFS_DEVICE_NO_FASTAUTO),
+	UFS_FIX(UFS_VENDOR_SAMSUNG, UFS_ANY_MODEL,
+		UFS_DEVICE_QUIRK_NO_LINK_OFF),
+#endif
 	UFS_FIX(UFS_VENDOR_MICRON, UFS_ANY_MODEL,
 		UFS_DEVICE_QUIRK_DELAY_BEFORE_LPM),
 	UFS_FIX(UFS_VENDOR_SAMSUNG, UFS_ANY_MODEL,
 		UFS_DEVICE_QUIRK_DELAY_BEFORE_LPM),
 	UFS_FIX(UFS_ANY_VENDOR, UFS_ANY_MODEL,
+		UFS_DEVICE_NO_FASTAUTO),
+	UFS_FIX(UFS_VENDOR_MICRON, UFS_ANY_MODEL,
 		UFS_DEVICE_NO_FASTAUTO),
 	UFS_FIX(UFS_VENDOR_SAMSUNG, UFS_ANY_MODEL,
 		UFS_DEVICE_QUIRK_HOST_PA_TACTIVATE),
@@ -447,8 +465,13 @@ static struct ufs_dev_fix ufs_fixups[] = {
 	UFS_FIX(UFS_VENDOR_TOSHIBA, "THGLF2G9D8KBADG",
 		UFS_DEVICE_QUIRK_PA_TACTIVATE),
 	UFS_FIX(UFS_VENDOR_SKHYNIX, UFS_ANY_MODEL, UFS_DEVICE_NO_VCCQ),
+#ifdef CONFIG_LFS_UFS
+	UFS_FIX(UFS_ANY_VENDOR, UFS_ANY_MODEL,
+		UFS_DEVICE_QUIRK_HOST_PA_SAVECONFIGTIME),
+#else
 	UFS_FIX(UFS_VENDOR_SKHYNIX, UFS_ANY_MODEL,
 		UFS_DEVICE_QUIRK_HOST_PA_SAVECONFIGTIME),
+#endif
 	UFS_FIX(UFS_VENDOR_SKHYNIX, UFS_ANY_MODEL,
 		UFS_DEVICE_QUIRK_WAIT_AFTER_REF_CLK_UNGATE),
 	UFS_FIX(UFS_VENDOR_SKHYNIX, "hB8aL1",
@@ -485,8 +508,11 @@ static int ufshcd_disable_clocks(struct ufs_hba *hba,
 				 bool is_gating_context);
 static int ufshcd_disable_clocks_keep_link_active(struct ufs_hba *hba,
 					      bool is_gating_context);
-static void ufshcd_hold_all(struct ufs_hba *hba);
+#if defined(CONFIG_UFSFEATURE)
+void ufshcd_release_all(struct ufs_hba *hba);
+#else
 static void ufshcd_release_all(struct ufs_hba *hba);
+#endif
 static int ufshcd_set_vccq_rail_unused(struct ufs_hba *hba, bool unused);
 static inline void ufshcd_add_delay_before_dme_cmd(struct ufs_hba *hba);
 static inline void ufshcd_save_tstamp_of_last_dme_cmd(struct ufs_hba *hba);
@@ -494,8 +520,11 @@ static int ufshcd_host_reset_and_restore(struct ufs_hba *hba);
 static void ufshcd_resume_clkscaling(struct ufs_hba *hba);
 static void ufshcd_suspend_clkscaling(struct ufs_hba *hba);
 static void __ufshcd_suspend_clkscaling(struct ufs_hba *hba);
+#if defined(CONFIG_UFSFEATURE)
+void ufshcd_hold_all(struct ufs_hba *hba);
+#else
 static void ufshcd_hold_all(struct ufs_hba *hba);
-static void ufshcd_release_all(struct ufs_hba *hba);
+#endif
 static void ufshcd_hba_vreg_set_lpm(struct ufs_hba *hba);
 static void ufshcd_hba_vreg_set_hpm(struct ufs_hba *hba);
 static int ufshcd_devfreq_target(struct device *dev,
@@ -877,8 +906,13 @@ static void ufshcd_print_uic_err_hist(struct ufs_hba *hba,
 
 		if (err_hist->reg[p] == 0)
 			continue;
+#ifdef CONFIG_LFS_UFS
+		print_ufs_error_spec(hba, err_name, err_hist->reg[p],
+			ktime_to_us(err_hist->tstamp[p]), i);
+#else
 		dev_err(hba->dev, "%s[%d] = 0x%x at %lld us\n", err_name, i,
 			err_hist->reg[p], ktime_to_us(err_hist->tstamp[p]));
+#endif
 	}
 }
 
@@ -3003,13 +3037,21 @@ static void ufshcd_exit_hibern8_on_idle(struct ufs_hba *hba)
 	device_remove_file(hba->dev, &hba->hibern8_on_idle.enable_attr);
 }
 
+#if defined(CONFIG_UFSFEATURE)
+void ufshcd_hold_all(struct ufs_hba *hba)
+#else
 static void ufshcd_hold_all(struct ufs_hba *hba)
+#endif
 {
 	ufshcd_hold(hba, false);
 	ufshcd_hibern8_hold(hba, false);
 }
 
+#if defined(CONFIG_UFSFEATURE)
+void ufshcd_release_all(struct ufs_hba *hba)
+#else
 static void ufshcd_release_all(struct ufs_hba *hba)
+#endif
 {
 	ufshcd_hibern8_release(hba, false);
 	ufshcd_release(hba, false);
@@ -3591,6 +3633,10 @@ static int ufshcd_comp_scsi_upiu(struct ufs_hba *hba, struct ufshcd_lrb *lrbp)
 		lrbp->command_type = UTP_CMD_TYPE_UFS_STORAGE;
 
 	if (likely(lrbp->cmd)) {
+#if defined(CONFIG_UFSFEATURE)
+		if(hba->dev_info.w_manufacturer_id == UFS_VENDOR_SAMSUNG)
+			ufsf_tw_prep_fn(&hba->ufsf, lrbp);
+#endif
 		ret = ufshcd_prepare_req_desc_hdr(hba, lrbp,
 				&upiu_flags, lrbp->cmd->sc_data_direction);
 		ufshcd_prepare_utp_scsi_cmd_upiu(lrbp, upiu_flags);
@@ -4052,8 +4098,13 @@ static inline void ufshcd_put_dev_cmd_tag(struct ufs_hba *hba, int tag)
  * NOTE: Since there is only one available tag for device management commands,
  * it is expected you hold the hba->dev_cmd.lock mutex.
  */
+#if defined(CONFIG_UFSFEATURE)
+int ufshcd_exec_dev_cmd(struct ufs_hba *hba,
+			enum dev_cmd_type cmd_type, int timeout)
+#else
 static int ufshcd_exec_dev_cmd(struct ufs_hba *hba,
-		enum dev_cmd_type cmd_type, int timeout)
+ 		enum dev_cmd_type cmd_type, int timeout)
+#endif
 {
 	struct ufshcd_lrb *lrbp;
 	int err;
@@ -4622,18 +4673,53 @@ static inline int ufshcd_read_desc(struct ufs_hba *hba,
 	return ufshcd_read_desc_param(hba, desc_id, desc_index, 0, buf, size);
 }
 
+
+#ifdef CONFIG_LFS_UFS
+int ufshcd_read_power_desc(struct ufs_hba *hba,
+					 u8 *buf,
+					 u32 size)
+{
+	return ufshcd_read_desc(hba, QUERY_DESC_IDN_POWER, 0, buf, size);
+}
+#else
 static inline int ufshcd_read_power_desc(struct ufs_hba *hba,
 					 u8 *buf,
 					 u32 size)
 {
 	return ufshcd_read_desc(hba, QUERY_DESC_IDN_POWER, 0, buf, size);
 }
-
+#endif
 int ufshcd_read_device_desc(struct ufs_hba *hba, u8 *buf, u32 size)
 {
 	return ufshcd_read_desc(hba, QUERY_DESC_IDN_DEVICE, 0, buf, size);
 }
 
+#ifdef CONFIG_LFS_UFS
+int ufshcd_read_geo_desc(struct ufs_hba *hba, u8 *buf, u32 size)
+{
+	return ufshcd_read_desc(hba, QUERY_DESC_IDN_GEOMETRY, 0, buf, size);
+}
+
+int ufshcd_read_config_desc(struct ufs_hba *hba, u8 *buf, u32 size)
+{
+	return ufshcd_read_desc(hba, QUERY_DESC_IDN_CONFIGURATION, 0, buf, size);
+}
+
+int ufshcd_read_unit_desc(struct ufs_hba *hba, int u_index, u8 *buf, u32 size)
+{
+	return ufshcd_read_desc(hba, QUERY_DESC_IDN_UNIT, u_index, buf, size);
+}
+
+int ufshcd_read_inter_desc(struct ufs_hba *hba, u8 *buf, u32 size)
+{
+	return ufshcd_read_desc(hba, QUERY_DESC_IDN_INTERCONNECT, 0, buf, size);
+}
+
+int ufshcd_read_health_desc(struct ufs_hba *hba, u8 *buf, u32 size)
+{
+	return ufshcd_read_desc(hba, QUERY_DESC_IDN_HEALTH, 0, buf, size);
+}
+#endif
 /**
  * ufshcd_read_string_desc - read string descriptor
  * @hba: pointer to adapter instance
@@ -5703,7 +5789,6 @@ static int ufshcd_complete_dev_init(struct ufs_hba *hba)
 			__func__, err);
 		goto out;
 	}
-
 	/*
 	 * Some vendor devices are taking longer time to complete its internal
 	 * initialization, so set fDeviceInit flag poll time to 5 secs
@@ -6203,6 +6288,18 @@ static int ufshcd_slave_configure(struct scsi_device *sdev)
 	struct ufs_hba *hba = shost_priv(sdev->host);
 	struct request_queue *q = sdev->request_queue;
 
+#if defined(CONFIG_UFSFEATURE)
+	if(hba->dev_info.w_manufacturer_id == UFS_VENDOR_SAMSUNG){
+		struct ufsf_feature *ufsf = &hba->ufsf;
+
+		if (ufsf_is_valid_lun(sdev->lun)) {
+			ufsf->sdev_ufs_lu[sdev->lun] = sdev;
+			ufsf->slave_conf_cnt++;
+			printk(KERN_ERR "%s: ufsfeature set lun %d sdev %p q %p\n",
+				   __func__, (int)sdev->lun, sdev, sdev->request_queue);
+		}
+	}
+#endif
 	blk_queue_update_dma_pad(q, PRDT_DATA_BYTE_COUNT_PAD - 1);
 	blk_queue_max_segment_size(q, PRDT_DATA_BYTE_COUNT_MAX);
 
@@ -7520,7 +7617,17 @@ static irqreturn_t ufshcd_update_uic_error(struct ufs_hba *hba)
 						__func__, reg);
 					hba->full_init_linereset = true;
 				}
+#ifdef CONFIG_LFS_UFS
+                else{
+                  dev_err(hba->dev, "%s: LINERESET during cmd=0x%x, reg 0x%x\n",__func__, cmd->command, reg);
+                }
+#endif
 			}
+#ifdef CONFIG_LFS_UFS
+            else{
+              dev_err(hba->dev, "%s: LINERESET during cmd=NULL, reg 0x%x\n", __func__, reg);
+            }
+#endif
 			if (!hba->full_init_linereset)
 				queue_work(hba->recovery_wq, &hba->rls_work);
 		}
@@ -7913,6 +8020,10 @@ static int ufshcd_eh_device_reset_handler(struct scsi_cmnd *cmd)
 out:
 	hba->req_abort_count = 0;
 	if (!err) {
+#if defined(CONFIG_UFSFEATURE)
+		if(hba->dev_info.w_manufacturer_id == UFS_VENDOR_SAMSUNG)
+			ufsf_tw_reset_lu(&hba->ufsf);
+#endif
 		err = SUCCESS;
 	} else {
 		dev_err(hba->dev, "%s: failed with err %d\n", __func__, err);
@@ -8199,6 +8310,9 @@ static int ufshcd_reset_and_restore(struct ufs_hba *hba)
 	int err = 0;
 	int retries = MAX_HOST_RESET_RETRIES;
 
+#ifdef CONFIG_LFS_UFS
+	dev_err(hba->dev, "%s: [LGE] start reset to restore host and device\n", __func__);
+#endif
 	ufshcd_enable_irq(hba);
 
 	do {
@@ -8541,6 +8655,9 @@ static int ufs_get_device_desc(struct ufs_hba *hba,
 	    (dev_desc->wspecversion == 0x220) ||
 	    (dev_desc->wmanufacturerid == UFS_VENDOR_TOSHIBA &&
 	     dev_desc->wspecversion >= 0x300 &&
+	     hba->desc_size.dev_desc >= 0x59) ||
+	    (dev_desc->wmanufacturerid == UFS_VENDOR_SKHYNIX &&
+	     dev_desc->wspecversion >= 0x210 &&
 	     hba->desc_size.dev_desc >= 0x59)) {
 		hba->dev_info.d_ext_ufs_feature_sup =
 			desc_buf[DEVICE_DESC_PARAM_EXT_UFS_FEATURE_SUP]
@@ -8610,7 +8727,14 @@ static void ufs_fixup_device_setup(struct ufs_hba *hba,
 		     f->w_manufacturer_id == UFS_ANY_VENDOR) &&
 		    (STR_PRFX_EQUAL(f->model, dev_desc->model) ||
 		     !strcmp(f->model, UFS_ANY_MODEL)))
+#ifdef CONFIG_LFS_UFS
+			{
+				dev_err(hba->dev, "[LGE][UFS] update quirks, manufacturerid:%d, model:%s, quirk:0x%x\n", f->w_manufacturer_id, f->model, f->quirk);
+				hba->dev_info.quirks |= f->quirk;
+			}
+#else
 			hba->dev_info.quirks |= f->quirk;
+#endif
 	}
 }
 
@@ -9086,6 +9210,10 @@ reinit:
 		/* Reset the host controller */
 		spin_lock_irqsave(hba->host->host_lock, flags);
 		ufshcd_hba_stop(hba, false);
+#if defined(CONFIG_UFSFEATURE)
+		if(hba->dev_info.w_manufacturer_id == UFS_VENDOR_SAMSUNG)
+			ufsf_tw_reset_host(&hba->ufsf);
+#endif
 		spin_unlock_irqrestore(hba->host->host_lock, flags);
 
 		err = ufshcd_hba_enable(hba);
@@ -9206,8 +9334,15 @@ reinit:
 			hba->clk_scaling.is_allowed = true;
 			hba->clk_scaling.is_suspended = false;
 		}
-
+#if defined(CONFIG_UFSFEATURE)
+		if(hba->dev_info.w_manufacturer_id == UFS_VENDOR_SAMSUNG)
+			ufsf_device_check(hba);
+#endif
 		scsi_scan_host(hba->host);
+#if defined(CONFIG_UFSFEATURE)
+		if(hba->dev_info.w_manufacturer_id == UFS_VENDOR_SAMSUNG)
+			ufsf_tw_init(&hba->ufsf);
+#endif
 		pm_runtime_put_sync(hba->dev);
 	}
 
@@ -9226,6 +9361,10 @@ out:
 		ufshcd_exit_clk_scaling(hba);
 		ufshcd_hba_exit(hba);
 	}
+#if defined(CONFIG_UFSFEATURE)
+	if(hba->dev_info.w_manufacturer_id == UFS_VENDOR_SAMSUNG)
+		ufsf_tw_reset(&hba->ufsf);
+#endif
 
 	trace_ufshcd_init(dev_name(hba->dev), ret,
 		ktime_to_us(ktime_sub(ktime_get(), start)),
@@ -9323,7 +9462,15 @@ static int ufshcd_query_ioctl(struct ufs_hba *hba, u8 lun, void __user *buffer)
 			__func__, err);
 		goto out_release_mem;
 	}
-
+#if defined(CONFIG_UFSFEATURE)
+	if(hba->dev_info.w_manufacturer_id == UFS_VENDOR_SAMSUNG){
+		if (ufsf_check_query(ioctl_data->opcode)) {
+			err = ufsf_query_ioctl(&hba->ufsf, lun, buffer, ioctl_data,
+						   UFSFEATURE_SELECTOR);
+			goto out_release_mem;
+		}
+	}
+#endif
 	/* verify legal parameters & send query */
 	switch (ioctl_data->opcode) {
 	case UPIU_QUERY_OPCODE_READ_DESC:
@@ -10384,6 +10531,10 @@ static int ufshcd_suspend(struct ufs_hba *hba, enum ufs_pm_op pm_op)
 	if (ret)
 		goto out;
 
+#if defined(CONFIG_UFSFEATURE)
+	if(hba->dev_info.w_manufacturer_id == UFS_VENDOR_SAMSUNG)
+		ufsf_tw_suspend(&hba->ufsf);
+#endif
 	/*
 	 * If we can't transition into any of the low power modes
 	 * just gate the clocks.
@@ -10837,6 +10988,509 @@ int ufshcd_runtime_idle(struct ufs_hba *hba)
 }
 EXPORT_SYMBOL(ufshcd_runtime_idle);
 
+#ifdef CONFIG_LFS_UFS_SYSFS_COMMON
+#include <asm/unaligned.h>
+enum field_width {
+	BYTE	= 1,
+	WORD	= 2,
+#ifdef CONFIG_LFS_UFS
+	BYTE_3	= 3,
+	DWORD   = 4,
+	LONG	= 8,
+	BYTE_12	= 12,
+	BYTE_24	= 24,
+#endif
+};
+
+struct desc_field_offset {
+	char *name;
+	int offset;
+	enum field_width width_byte;
+};
+
+void ufsdbg_print_micron_device_report_write_aura(struct ufs_hba *hba)
+{
+	#define WRITE_BUFFER_LEN 44
+
+	unsigned char write_cmd[10];
+
+	u8 *write_device_report_buf = 0;
+	int err = 0;
+	struct scsi_sense_hdr sshdr;
+	struct scsi_device *sdev = NULL;
+
+	write_device_report_buf = kzalloc(WRITE_BUFFER_LEN, GFP_KERNEL);
+	if (!write_device_report_buf)
+		return;
+
+	write_cmd[0] = 0x3B;
+	write_cmd[1] = 0xE1;
+	write_cmd[2] = 0;
+
+	write_cmd[3] = 0;
+	write_cmd[4] = 0;
+	write_cmd[5] = 0;
+
+	write_cmd[6] = 0;
+	write_cmd[7] = 0;
+	write_cmd[8] = 0x2C;
+	write_cmd[9] = 0;
+
+	memset(write_device_report_buf, 0x00, WRITE_BUFFER_LEN);
+
+	write_device_report_buf[0] = 0xFE;
+	write_device_report_buf[1] = 0x40;
+	write_device_report_buf[2] = 0;
+	write_device_report_buf[3] = 0x10;
+	write_device_report_buf[4] = 0x01;
+
+	/* seems all general LU have the same record, so targeting to LUN0 */
+	sdev = scsi_device_lookup(hba->sdev_ufs_device->host, 0, 0, 0);
+	if (!sdev) {
+		pr_err("%s: fail to get lun0 device\n", __func__);
+		kfree(write_device_report_buf);
+		return;
+	}
+
+	//1. Command descriptor block (CDB) for WRITE BUFFER
+	err = scsi_execute_req(sdev, write_cmd, DMA_TO_DEVICE, write_device_report_buf,
+				  WRITE_BUFFER_LEN, &sshdr, 30 * HZ, 3, NULL);
+
+	scsi_device_put(sdev);
+
+	if (err) {
+		pr_err("%s: write fail to get device report for lun0 err=%d\n", __func__, err);
+		if (scsi_sense_valid(&sshdr)) {
+			pr_err("%s: sshdr : response_code(%d)/sense_key(%d)/asc(%d)/ascq(%d)\n", __func__,
+				sshdr.response_code, sshdr.sense_key, sshdr.asc, sshdr.ascq);
+		}
+
+		goto out_free;
+	}
+
+out_free:
+	if (write_device_report_buf)
+		kfree(write_device_report_buf);
+}
+
+void ufsdbg_print_micron_device_report_read_aura(struct ufs_hba *hba,char *buf)
+{
+	#define DR_BUFFER_LEN 512
+
+	struct desc_field_offset *tmp;
+	unsigned char cmd[10];
+	u8 *device_report_buf = 0;
+	int err = 0, i;
+	struct scsi_sense_hdr sshdr;
+	struct scsi_device *sdev = NULL;
+	char tmp_buf[32][32];
+
+	struct desc_field_offset device_report_field_name[] = {
+		{"bFactoryBadBlockCount",			0x00, WORD},
+		{"bRuntimeBadBlockCount",			0x02, WORD},
+		{"bSpareBlockCount",				0x04, WORD},
+		{"bReservedBlockCount(SLC)",		0x06, WORD},
+		{"bReservedBlockCount(TLC)",		0x08, WORD},
+		{"bExhaustedLife(SLC)",				0x0A, BYTE},
+		{"bExhaustedLife(TLC)",				0x0B, BYTE},
+		{"bMetadataCorruption",				0x0C, WORD},
+		{"bWriteAmplificationFactor",		0x0E, WORD},
+		{"bMinimumBlockErase(TLC)",			0x10, DWORD},
+		{"bMaximumBlockErase(TLC)",			0x14, DWORD},
+		{"bAverageBlockErase(TLC)",			0x18, DWORD},
+		{"bReserved",			   			0x1C, DWORD},
+		{"bMinimumBlockErase(SLC)",			0x20, DWORD},
+		{"bMaximumBlockErase(SLC)",			0x24, DWORD},
+		{"bAverageBlockErase(SLC)",			0x28, DWORD},
+		{"bReserved",						0x2C, DWORD},
+		{"bInitializationCount(success)",	0x30, DWORD},
+		{"bInitializationCount(failure)",	0x34, DWORD},
+		{"bReadReclaimCount(SLC)",			0x38, DWORD},
+		{"bReadReclaimCount(TLC)",			0x3C, DWORD},
+		{"bReadDataSize(100MB unit)",		0x40, DWORD},
+		{"bWrittenDataSize(100MB unit)",	0x44, DWORD},
+		{"bSPOR_WriteFailCount",			0x48, DWORD},
+		{"bSPOR_RecoveryCount",				0x4C, DWORD},
+		{"bVDET_Count",						0x50, DWORD},
+		{"bUECC_Count",						0x54, DWORD},
+		{"bReadRetryCount",					0x58, DWORD},
+		{"bReserved",						0x5C, DWORD},
+	};
+
+	device_report_buf = kzalloc(DR_BUFFER_LEN, GFP_KERNEL);
+	if (!device_report_buf)
+		return;
+
+	memset(device_report_buf, 0x00, DR_BUFFER_LEN);
+	pr_err("%s: test\n", __func__);
+	cmd[0] = 0x3C;
+	cmd[1] = 0xC1;
+	cmd[2] = 0;
+
+	cmd[3] = 0;
+	cmd[4] = 0;
+	cmd[5] = 0;
+
+	cmd[6] = 0;
+	cmd[7] = 0x02;
+	cmd[8] = 0;
+	cmd[9] = 0;
+
+	/* seems all general LU have the same record, so targeting to LUN0 */
+	sdev = scsi_device_lookup(hba->sdev_ufs_device->host, 0, 0, 0);
+	if (!sdev) {
+		pr_err("%s: fail to get lun0 device\n", __func__);
+		kfree(device_report_buf);
+		return;
+	}
+
+	err = scsi_execute_req(sdev, cmd, DMA_FROM_DEVICE, device_report_buf,
+				  DR_BUFFER_LEN, &sshdr, 30 * HZ, 3, NULL);
+
+	scsi_device_put(sdev);
+
+	if (err) {
+		pr_err("%s: read fail to get device report for lun0 err=%d\n", __func__, err);
+		if (scsi_sense_valid(&sshdr)) {
+			pr_err("%s: sshdr : response_code(%d)/sense_key(%d)/asc(%d)/ascq(%d)\n", __func__,
+				sshdr.response_code, sshdr.sense_key, sshdr.asc, sshdr.ascq);
+		}
+
+		goto out_free;
+	}
+
+	/* seems little endian */
+	for (i = 0; i < ARRAY_SIZE(device_report_field_name); ++i) {
+		u64 val = 0;
+		tmp = &device_report_field_name[i];
+
+		switch (tmp->width_byte) {
+			case BYTE:
+				val = (u8)device_report_buf[tmp->offset];
+				break;
+			case WORD:
+				val = (u16)get_unaligned_be16(&device_report_buf[tmp->offset]);
+				break;
+			case DWORD:
+				val = (u32)get_unaligned_be32(&device_report_buf[tmp->offset]);
+				break;
+			default:
+				break;
+		}
+
+		sprintf(tmp_buf[i],"%s = 0x%llx :",tmp->name,val);
+		strcat(buf,tmp_buf[i]);
+	}
+	strcat(buf,"\n");
+out_free:
+	if (device_report_buf)
+		kfree(device_report_buf);
+
+}
+
+void ufsdbg_print_samsung_device_report_set_password_aura(struct ufs_hba *hba)
+{
+	unsigned char set_pw_cmd[16] = {0,};
+
+	int err = 0;
+	struct scsi_sense_hdr sshdr;
+	struct scsi_device *sdev = NULL;
+
+	set_pw_cmd[0] = 0xC0;
+	set_pw_cmd[1] = 0x03;
+
+	set_pw_cmd[2] = 0x01;
+	set_pw_cmd[3] = 0x02;
+	set_pw_cmd[4] = 0x03;
+	set_pw_cmd[5] = 0x04;
+
+	// seems all general LU have the same record, so targeting to LUN0
+	sdev = scsi_device_lookup(hba->sdev_ufs_device->host, 0, 0, 0);
+	if (!sdev) {
+		pr_err("%s: fail to get lun0 device\n", __func__);
+		return;
+	}
+	//1. set password
+	err = scsi_execute_req(sdev, set_pw_cmd, DMA_NONE, NULL,
+				  0, &sshdr, 30 * HZ, 3, NULL);
+
+	scsi_device_put(sdev);
+
+	if (err) {
+		pr_err("%s: Password set fail to get device report for lun0 err=%d\n", __func__, err);
+		if (scsi_sense_valid(&sshdr)) {
+			pr_err("%s: sshdr : response_code(%d)/sense_key(%d)/asc(%d)/ascq(%d)\n", __func__,
+				sshdr.response_code, sshdr.sense_key, sshdr.asc, sshdr.ascq);
+		}
+	}
+
+}
+
+void ufsdbg_print_samsung_device_report_read_aura(struct ufs_hba *hba,char *buf)
+{
+	#define CMD_LEN 16
+	#define SS_BUFFER_LEN	96
+	struct desc_field_offset *tmp;
+	unsigned char read_information_cmd[CMD_LEN] = {0,};
+	unsigned char vendor_enter_cmd[CMD_LEN] = {0,};
+	unsigned char vendor_exit_cmd[CMD_LEN] = {0,};
+	u8 *device_report_buf = 0;
+	int err = 0, i;
+	struct scsi_sense_hdr sshdr;
+	struct scsi_device *sdev = NULL;
+	char tmp_buf[32][32];
+
+	struct desc_field_offset device_report_field_name[] = {
+		{"bLength",							0x00, DWORD},
+		{"bDescriptorType",					0x04, BYTE},
+		{"bSSRVersion",						0x06, WORD},
+		{"bMaximumEraseCycle(SLC)",			0x08, DWORD},
+		{"bMinimumEraseCycle(SLC)",			0x0C, DWORD},
+		{"bAverageEaseCycle(SLC)",			0x10, DWORD},
+		{"bMaximumEraseCycle(TLC)",			0x14, DWORD},
+		{"bMinimumEraseCycle(TLC)",			0x18, DWORD},
+		{"bAverageEaseCycle(TLC)",			0x1C, DWORD},
+		{"bMinimumBlockErase(TLC)",			0x10, DWORD},
+		{"bMaximumBlockErase(TLC)",			0x14, DWORD},
+		{"bAverageBlockErase(TLC)",			0x18, DWORD},
+		{"bReadReclaimCount",			   	0x20, DWORD},
+		{"bInitialBadBlock",				0x24, DWORD},
+		{"bRuntimeBadBlock",				0x28, DWORD},
+		{"bRemainReservedBlock",			0x2C, DWORD},
+		{"bReserved",						0x30, DWORD},
+		{"bReserved",						0x34, DWORD},
+		{"bWrittenData(10MB Unit)",			0x38, DWORD},
+		{"bOpenCount",						0x3C, DWORD},
+		{"bFirmwareSuccessCount",			0x40, DWORD},
+		{"bReserved",						0x44, DWORD},
+		{"bReserved",						0x48, DWORD},
+		{"bPON_InitializationCount",		0x4C, DWORD},
+		{"bSPOR_InitializationCount",		0x50, DWORD},
+		{"bReserved",						0x54, DWORD},
+	};
+
+	device_report_buf = kzalloc(SS_BUFFER_LEN, GFP_KERNEL);
+	if (!device_report_buf)
+		return;
+
+	memset(device_report_buf, 0x00, SS_BUFFER_LEN);
+
+	vendor_enter_cmd[0] = 0xC0;
+	vendor_enter_cmd[1] = 0x00;
+	vendor_enter_cmd[2] = 0x5C;
+	vendor_enter_cmd[3] = 0x38;
+	vendor_enter_cmd[4] = 0x23;
+	vendor_enter_cmd[5] = 0xAE;
+	vendor_enter_cmd[6] = 0x01;
+	vendor_enter_cmd[7] = 0x02;
+	vendor_enter_cmd[8] = 0x03;
+	vendor_enter_cmd[9] = 0x04;
+
+	vendor_exit_cmd[0] = 0xC0;
+	vendor_exit_cmd[1] = 0x01;
+
+	read_information_cmd[0] = 0xC0;
+	read_information_cmd[1] = 0x40;
+
+	read_information_cmd[4] = 0x01;
+	read_information_cmd[5] = 0x0A;
+
+	read_information_cmd[15] = 0x60;
+
+	// seems all general LU have the same record, so targeting to LUN0
+	sdev = scsi_device_lookup(hba->sdev_ufs_device->host, 0, 0, 0);
+	if (!sdev) {
+		pr_err("%s: fail to get lun0 device\n", __func__);
+		kfree(device_report_buf);
+		return;
+	}
+
+	//2. vendor mode enter
+    err = scsi_execute_req(sdev, vendor_enter_cmd, DMA_NONE, NULL,
+				  0, &sshdr, 30 * HZ, 3, NULL);
+
+	if (err) {
+		pr_err("%s: vendor mode enter fail to get device report for lun0 err=%d\n", __func__, err);
+		if (scsi_sense_valid(&sshdr)) {
+			pr_err("%s: sshdr : response_code(%d)/sense_key(%d)/asc(%d)/ascq(%d)\n", __func__,
+				sshdr.response_code, sshdr.sense_key, sshdr.asc, sshdr.ascq);
+		}
+		goto out_free;
+	}
+
+
+	//3. Nand information read
+	err = scsi_execute_req(sdev, read_information_cmd, DMA_FROM_DEVICE, device_report_buf,
+				  SS_BUFFER_LEN, &sshdr, 30 * HZ, 3, NULL);
+
+	if (err) {
+		pr_err("%s: 96 read fail to get device report for lun0 err=%d\n", __func__, err);
+		if (scsi_sense_valid(&sshdr)) {
+			pr_err("%s: sshdr : response_code(%d)/sense_key(%d)/asc(%d)/ascq(%d)\n", __func__,
+				sshdr.response_code, sshdr.sense_key, sshdr.asc, sshdr.ascq);
+		}
+
+	}
+
+	//4 vendor mode exit
+	err = scsi_execute_req(sdev, vendor_exit_cmd, DMA_NONE, NULL,
+				  0, &sshdr, 30 * HZ, 3, NULL);
+
+	if (err) {
+		pr_err("%s: vendor mode exit fail to get device report for lun0 err=%d\n", __func__, err);
+		if (scsi_sense_valid(&sshdr)) {
+			pr_err("%s: sshdr : response_code(%d)/sense_key(%d)/asc(%d)/ascq(%d)\n", __func__,
+				sshdr.response_code, sshdr.sense_key, sshdr.asc, sshdr.ascq);
+		}
+
+		goto out_free;
+	}
+
+	// seems little endian
+	for (i = 0; i < ARRAY_SIZE(device_report_field_name); ++i) {
+		u64 val = 0;
+
+		tmp = &device_report_field_name[i];
+
+		switch (tmp->width_byte) {
+			case BYTE:
+				val = (u8)device_report_buf[tmp->offset];
+				break;
+			case WORD:
+				val = (u16)get_unaligned_be16(&device_report_buf[tmp->offset]);
+				break;
+			case DWORD:
+				val = (u32)get_unaligned_be32(&device_report_buf[tmp->offset]);
+				break;
+			default:
+				break;
+		}
+
+		sprintf(tmp_buf[i],"%s = 0x%llx :",tmp->name,val);
+		strcat(buf,tmp_buf[i]);
+	}
+	strcat(buf,"\n");
+out_free:
+	scsi_device_put(sdev);
+	if (device_report_buf)
+		kfree(device_report_buf);
+
+}
+
+static ssize_t ufsdbg_vendor_health_desc_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+
+	struct ufs_hba *hba = dev_get_drvdata(dev);
+	if(hba->dev_info.w_manufacturer_id == UFS_VENDOR_MICRON)
+	{
+		ufsdbg_print_micron_device_report_write_aura(hba);
+		ufsdbg_print_micron_device_report_read_aura(hba,buf);
+	}else if(hba->dev_info.w_manufacturer_id == UFS_VENDOR_SAMSUNG)
+	{
+		ufsdbg_print_samsung_device_report_set_password_aura(hba);
+		ufsdbg_print_samsung_device_report_read_aura(hba,buf);
+	}
+	else
+	{
+		return 0;
+	}
+
+	return strlen(buf);
+}
+
+static ssize_t ufsdbg_vendor_health_desc_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	return 0;
+}
+
+static void ufsdbg_add_vendor_health_desc_sysfs_node(struct ufs_hba *hba)
+{
+	hba->vendor_health_desc_attr.show = ufsdbg_vendor_health_desc_show;
+	hba->vendor_health_desc_attr.store = ufsdbg_vendor_health_desc_store;
+	sysfs_attr_init(&hba->vendor_health_desc_attr.attr);
+	hba->vendor_health_desc_attr.attr.name = "vendor_health_desc";
+	hba->vendor_health_desc_attr.attr.mode = S_IRUGO;
+	if (device_create_file(hba->dev, &hba->vendor_health_desc_attr))
+		dev_err(hba->dev, "Failed to create sysfs for vendor_health_desc_attr\n");
+}
+
+static ssize_t ufsdbg_ufs_uic_err_desc_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct ufs_hba *hba = dev_get_drvdata(dev);
+	int curr_len = 0;
+
+	curr_len = sprintf(buf,"UIC_PHY_ADAPTER_LAYER_ERROR Count = %d :UIC_DATA_LINK_LAYER_ERROR Count = %d :UIC_DME_ERROR Count = %d:LINE_RESET Count = %d :\n",hba->ufs_stats.pa_err_cnt_total,hba->ufs_stats.dl_err_cnt_total,hba->ufs_stats.dme_err_cnt,hba->ufs_stats.pa_err_cnt[UFS_EC_PA_LINE_RESET]);
+
+	return curr_len;
+
+}
+
+static ssize_t ufsdbg_ufs_uic_err_desc_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	return 0;
+}
+
+static void ufsdbg_add_ufs_uic_err_desc_sysfs_node(struct ufs_hba *hba)
+{
+	hba->ufs_uic_err_desc_attr.show = ufsdbg_ufs_uic_err_desc_show;
+	hba->ufs_uic_err_desc_attr.store = ufsdbg_ufs_uic_err_desc_store;
+	sysfs_attr_init(&hba->ufs_uic_err_desc_attr.attr);
+	hba->ufs_uic_err_desc_attr.attr.name = "ufs_uic_err_desc";
+	hba->ufs_uic_err_desc_attr.attr.mode = S_IRUGO;
+	if (device_create_file(hba->dev, &hba->ufs_uic_err_desc_attr))
+		dev_err(hba->dev, "Failed to create sysfs for ufs_uic_err_desc_attr\n");
+}
+
+static ssize_t ufsdbg_health_desc_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	int err = 0;
+	struct ufs_hba *hba = dev_get_drvdata(dev);
+	int curr_len = 0;
+	int buff_len = QUERY_DESC_HEALTH_DEF_SIZE;
+	u8 desc_buf[QUERY_DESC_HEALTH_DEF_SIZE];
+
+	pm_runtime_get_sync(hba->dev);
+	err = ufshcd_read_health_desc(hba, desc_buf, buff_len);
+	pm_runtime_put_sync(hba->dev);
+
+	if (!err) {
+		curr_len = sprintf(buf, "bLength %d bDescriptorIDN %d bPreEOLInfo %d bDeviceLifeTimeEstA %d bDeviceLifeTimeEstB %d\n",
+			desc_buf[0], desc_buf[1], desc_buf[2], desc_buf[3], desc_buf[4]);
+	}
+
+	return curr_len;
+}
+
+static ssize_t ufsdbg_health_desc_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	return 0;
+}
+
+static void ufsdbg_add_health_desc_sysfs_node(struct ufs_hba *hba)
+{
+	hba->health_desc_attr.show = ufsdbg_health_desc_show;
+	hba->health_desc_attr.store = ufsdbg_health_desc_store;
+	sysfs_attr_init(&hba->health_desc_attr.attr);
+	hba->health_desc_attr.attr.name = "health_desc";
+	hba->health_desc_attr.attr.mode = S_IRUGO;
+	if (device_create_file(hba->dev, &hba->health_desc_attr))
+		dev_err(hba->dev, "Failed to create sysfs for health_desc_attr\n");
+}
+
+static void ufsdbg_add_sysfs_nodes(struct ufs_hba *hba)
+{
+	ufsdbg_add_health_desc_sysfs_node(hba);
+	ufsdbg_add_vendor_health_desc_sysfs_node(hba);
+	ufsdbg_add_ufs_uic_err_desc_sysfs_node(hba);
+}
+#endif
+
 static void __ufshcd_shutdown_clkscaling(struct ufs_hba *hba)
 {
 	bool suspend = false;
@@ -10926,6 +11580,10 @@ EXPORT_SYMBOL(ufshcd_shutdown);
  */
 void ufshcd_remove(struct ufs_hba *hba)
 {
+#if defined(CONFIG_UFSFEATURE)
+	if(hba->dev_info.w_manufacturer_id == UFS_VENDOR_SAMSUNG)
+		ufsf_tw_release(&hba->ufsf);
+#endif
 	ufs_sysfs_remove_nodes(hba->dev);
 	scsi_remove_host(hba->host);
 	/* disable interrupts */
@@ -11017,6 +11675,39 @@ out_error:
 }
 EXPORT_SYMBOL(ufshcd_alloc_host);
 
+#ifdef CONFIG_LFS_UFS_SYSFS_COMMON
+#include <linux/proc_fs.h>
+static struct proc_dir_entry*	procfs_root;
+
+bool ufsdbg_procfs_create(struct ufs_hba* hba)
+{
+	#define UFSDBG_PROCFS_ROOT    "storage"	/* /proc/storage/ufs */
+	struct proc_dir_entry*	root;
+	char name[64];
+
+	if (!hba)
+		return false;
+
+	root = proc_mkdir(UFSDBG_PROCFS_ROOT, NULL);
+	if (NULL != root) {
+		sprintf(name, "/sys/devices/platform/soc/%s", dev_name(hba->dev));
+		if (!proc_symlink("ufs", root, name)) {
+			return false;
+		}
+	}
+
+	procfs_root = root;
+	return true;
+}
+
+bool ufsdbg_procfs_destroy(struct ufs_hba* hba)
+{
+	if (procfs_root)
+		proc_remove(procfs_root);
+
+	return true;
+}
+#endif
 /**
  * ufshcd_init - Driver initialization routine
  * @hba: per-adapter instance
@@ -11095,6 +11786,10 @@ int ufshcd_init(struct ufs_hba *hba, void __iomem *mmio_base, unsigned int irq)
 	host->set_dbd_for_caching = 1;
 
 	hba->max_pwr_info.is_valid = false;
+
+#ifdef CONFIG_LFS_SCSI_DEVICE_IDENTIFIER
+	host->by_ufs = 1;
+#endif
 
 	/* Initailize wait queue for task management */
 	init_waitqueue_head(&hba->tm_wq);
@@ -11218,6 +11913,11 @@ int ufshcd_init(struct ufs_hba *hba, void __iomem *mmio_base, unsigned int irq)
 	ufshcd_set_ufs_dev_active(hba);
 
 	ufshcd_cmd_log_init(hba);
+#if defined(CONFIG_UFSFEATURE)
+	if(hba->dev_info.w_manufacturer_id == UFS_VENDOR_SAMSUNG)
+		ufsf_tw_set_init_state(&hba->ufsf);
+#endif
+
 
 	async_schedule(ufshcd_async_scan, hba);
 
@@ -11225,7 +11925,12 @@ int ufshcd_init(struct ufs_hba *hba, void __iomem *mmio_base, unsigned int irq)
 
 	ufs_sysfs_add_nodes(hba->dev);
 
+#ifdef CONFIG_LFS_UFS_SYSFS_COMMON
+	ufsdbg_add_sysfs_nodes(hba);
+	ufsdbg_procfs_create(hba);
+#endif
 	return 0;
+
 
 out_remove_scsi_host:
 	scsi_remove_host(hba->host);

@@ -17,6 +17,11 @@
 #include "sde_crtc.h"
 #include "sde_rm.h"
 
+#if IS_ENABLED(CONFIG_LGE_DISPLAY_COMMON)
+#include "lge/brightness/lge_brightness.h"
+#include "lge/ambient/lge_backlight_ex.h"
+#endif
+
 #define BL_NODE_NAME_SIZE 32
 #define HDR10_PLUS_VSIF_TYPE_CODE      0x81
 
@@ -74,6 +79,10 @@ static int sde_backlight_device_update_status(struct backlight_device *bd)
 	int bl_lvl;
 	struct drm_event event;
 	int rc = 0;
+
+#if IS_ENABLED(CONFIG_LGE_DISPLAY_COMMON)
+	return lge_backlight_device_update_status(bd);
+#endif
 
 	brightness = bd->props.brightness;
 
@@ -148,7 +157,11 @@ static int sde_backlight_setup(struct sde_connector *c_conn,
 	display = (struct dsi_display *) c_conn->display;
 	bl_config = &display->panel->bl_config;
 	props.max_brightness = bl_config->brightness_max_level;
+#if IS_ENABLED(CONFIG_LGE_DISPLAY_COMMON)
+	props.brightness = display->panel->lge.default_brightness;
+#else
 	props.brightness = bl_config->brightness_max_level;
+#endif
 	snprintf(bl_node_name, BL_NODE_NAME_SIZE, "panel%u-backlight",
 							display_count);
 	c_conn->bl_device = backlight_device_register(bl_node_name, dev->dev,
@@ -159,6 +172,10 @@ static int sde_backlight_setup(struct sde_connector *c_conn,
 		c_conn->bl_device = NULL;
 		return -ENODEV;
 	}
+#if IS_ENABLED(CONFIG_LGE_DISPLAY_COMMON)
+	if(display->panel->bl_config.type != DSI_BACKLIGHT_WLED)
+		display->panel->bl_config.raw_bd = c_conn->bl_device;
+#endif
 	display_count++;
 
 	return 0;
@@ -913,6 +930,7 @@ void sde_connector_helper_bridge_enable(struct drm_connector *connector)
 		c_conn->bl_device->props.state &= ~BL_CORE_FBBLANK;
 		backlight_update_status(c_conn->bl_device);
 	}
+
 	c_conn->panel_dead = false;
 }
 
@@ -965,7 +983,11 @@ void sde_connector_destroy(struct drm_connector *connector)
 		drm_property_blob_put(c_conn->blob_mode_info);
 	if (c_conn->blob_ext_hdr)
 		drm_property_blob_put(c_conn->blob_ext_hdr);
-
+#if IS_ENABLED(CONFIG_LGE_DISPLAY_COMMON)
+	if (c_conn->connector_type == DRM_MODE_CONNECTOR_DSI) {
+	    lge_backlight_ex_destroy(c_conn);
+	}
+#endif
 	if (c_conn->bl_device)
 		backlight_device_unregister(c_conn->bl_device);
 	drm_connector_unregister(connector);
@@ -2665,6 +2687,10 @@ struct drm_connector *sde_connector_init(struct drm_device *dev,
 		SDE_ERROR("failed to setup backlight, rc=%d\n", rc);
 		goto error_cleanup_fence;
 	}
+
+#if IS_ENABLED(CONFIG_LGE_DISPLAY_COMMON)
+	lge_backlight_ex_setup(c_conn, dev);
+#endif
 
 	/* create properties */
 	msm_property_init(&c_conn->property_info, &c_conn->base.base, dev,

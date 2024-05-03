@@ -279,6 +279,7 @@ config CRYPTO_CCM
 
 config CRYPTO_GCM
 	tristate "GCM/GMAC support"
+    default y
 	select CRYPTO_CTR
 	select CRYPTO_AEAD
 	select CRYPTO_GHASH

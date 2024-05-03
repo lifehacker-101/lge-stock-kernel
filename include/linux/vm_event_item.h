@@ -114,6 +114,12 @@ enum vm_event_item { PGPGIN, PGPGOUT, PGPGOUTCLEAN, PSWPIN, PSWPOUT,
 		SPECULATIVE_PGFAULT_ANON,	/* Speculative page fault field */
 		SPECULATIVE_PGFAULT_FILE,	/* Speculative page fault field */
 #endif
+#ifdef CONFIG_SCAN_BALANCE_COUNT
+		NR_SCAN_EQUAL,
+		NR_SCAN_FRACT,
+		NR_SCAN_ANON,
+		NR_SCAN_FILE,
+#endif
 		NR_VM_EVENT_ITEMS
 };
 

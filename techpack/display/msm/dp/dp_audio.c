@@ -606,6 +606,10 @@ static int dp_audio_register_ext_disp(struct dp_audio_private *audio)
 	rc = msm_ext_disp_register_intf(audio->ext_pdev, ext);
 	if (rc)
 		DP_ERR("failed to register disp\n");
+#ifdef CONFIG_LGE_DISPLAY_COMMON
+	else
+		DP_ERR("success to register disp\n");
+#endif
 #endif
 end:
 	if (pd)
@@ -647,6 +651,10 @@ static int dp_audio_deregister_ext_disp(struct dp_audio_private *audio)
 	rc = msm_ext_disp_deregister_intf(audio->ext_pdev, ext);
 	if (rc)
 		DP_ERR("failed to deregister disp\n");
+#ifdef CONFIG_LGE_DISPLAY_COMMON
+	else
+		DP_ERR("success to deregister disp\n");
+#endif
 #endif
 
 end:
@@ -687,7 +695,11 @@ static int dp_audio_notify(struct dp_audio_private *audio, u32 state)
 		goto end;
 	}
 
+#ifdef CONFIG_LGE_DISPLAY_COMMON
+	DP_ERR("success\n");
+#else
 	DP_DEBUG("success\n");
+#endif
 end:
 	return rc;
 }
@@ -748,7 +760,11 @@ static int dp_audio_on(struct dp_audio *dp_audio)
 	if (rc)
 		goto end;
 
+#ifdef CONFIG_LGE_DISPLAY_COMMON
+	DP_ERR("success\n");
+#else
 	DP_DEBUG("success\n");
+#endif
 end:
 	return rc;
 }
@@ -782,7 +798,11 @@ static int dp_audio_off(struct dp_audio *dp_audio)
 	if (rc)
 		goto end;
 
+#ifdef CONFIG_LGE_DISPLAY_COMMON
+	DP_ERR("success\n");
+#else
 	DP_DEBUG("success\n");
+#endif
 end:
 	dp_audio_config(audio, EXT_DISPLAY_CABLE_DISCONNECT);
 

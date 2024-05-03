@@ -2872,7 +2872,7 @@ static int sanity_check_raw_super(struct f2fs_sb_info *sbi,
 
 	/* check CP/SIT/NAT/SSA/MAIN_AREA area boundary */
 	if (sanity_check_area_boundary(sbi, bh))
-		return -EFSCORRUPTED;
+		return 1;
 
 	return 0;
 }
