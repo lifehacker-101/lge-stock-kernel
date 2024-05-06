@@ -147,7 +147,7 @@ typedef int (*msm_queue_find_func)(void *d1, void *d2);
 
 static void msm_init_queue(struct msm_queue_head *qhead)
 {
-	BUG_ON(!qhead);
+	//                                                                                            
 
 	INIT_LIST_HEAD(&qhead->list);
 	spin_lock_init(&qhead->lock);
@@ -438,7 +438,7 @@ static inline int __msm_sd_close_subdevs(struct msm_sd_subdev *msm_sd,
 static inline int __msm_destroy_session_streams(void *d1, void *d2)
 {
 	struct msm_stream *stream = d1;
-	pr_err("%s: Destroyed here due to list is not empty\n", __func__);
+    pr_err("%s: Destroyed here due to list is not empty\n", __func__);  /*                                                             */
 	INIT_LIST_HEAD(&stream->queued_list);
 	return 0;
 }
@@ -621,7 +621,7 @@ static unsigned int msm_poll(struct file *f,
 	int rc = 0;
 	struct v4l2_fh *eventq = f->private_data;
 
-	BUG_ON(!eventq);
+	//                                                                                            
 
 	poll_wait(f, &eventq->wait, pll_table);
 
@@ -696,6 +696,11 @@ int msm_post_event(struct v4l2_event *event, int timeout)
 		if (rc < 0) {
 			pr_err("%s: rc = %d\n", __func__, rc);
 			mutex_unlock(&session->lock);
+/*                                                                    */
+			pr_err("%s: ===== Camera Recovery Start! ===== \n", __func__);
+			dump_stack();
+			send_sig(SIGKILL, current, 0);
+/*                                                                    */
 			return rc;
 		}
 	}
@@ -769,7 +774,7 @@ static int msm_open(struct file *filep)
 	int rc;
 	unsigned long flags;
 	struct msm_video_device *pvdev = video_drvdata(filep);
-	BUG_ON(!pvdev);
+	//                                                                                            
 
 	/* !!! only ONE open is allowed !!! */
 	if (atomic_read(&pvdev->opened))
@@ -890,8 +895,8 @@ static void msm_sd_notify(struct v4l2_subdev *sd,
 	int rc = 0;
 	struct v4l2_subdev *subdev = NULL;
 
-	BUG_ON(!sd);
-	BUG_ON(!arg);
+	//                                                                                        
+	//                                                                                        
 
 	/* Check if subdev exists before processing*/
 	if (!msm_sd_find(sd->name))

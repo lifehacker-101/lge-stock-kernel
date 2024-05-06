@@ -163,7 +163,7 @@ static void msm_csiphy_reset(struct csiphy_device *csiphy_dev)
 static int msm_csiphy_subdev_g_chip_ident(struct v4l2_subdev *sd,
 			struct v4l2_dbg_chip_ident *chip)
 {
-	BUG_ON(!chip);
+	//                                                                                            
 	chip->ident = V4L2_IDENT_CSIPHY;
 	chip->revision = 0;
 	return 0;

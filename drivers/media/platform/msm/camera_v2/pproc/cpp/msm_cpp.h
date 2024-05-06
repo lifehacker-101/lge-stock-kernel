@@ -182,7 +182,13 @@ struct cpp_device {
 	char *fw_name_bin;
 	struct workqueue_struct *timer_wq;
 	struct msm_cpp_work_t *work;
-
+/*                                                                                    */
+#if !(defined(CONFIG_MACH_MSM8974_VU3_KR))
+/*                                                                                          */
+	uint8_t stream_cnt;
+/*                                                                                          */
+#endif
+/*                                                                                    */
 	int domain_num;
 	struct iommu_domain *domain;
 	struct device *iommu_ctx;

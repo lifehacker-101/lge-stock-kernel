@@ -173,7 +173,7 @@ static int msm_csid_irq_routine(struct v4l2_subdev *sd, u32 status,
 static int msm_csid_subdev_g_chip_ident(struct v4l2_subdev *sd,
 			struct v4l2_dbg_chip_ident *chip)
 {
-	BUG_ON(!chip);
+	//                                                                                            
 	chip->ident = V4L2_IDENT_CSID;
 	chip->revision = 0;
 	return 0;
@@ -333,6 +333,9 @@ static int msm_csid_init(struct csid_device *csid_dev, uint32_t *csid_version)
 
 	msm_csid_reset(csid_dev);
 	csid_dev->csid_state = CSID_POWER_UP;
+/*                                                                                                                     */
+	wake_lock_timeout(&csid_dev->csid_wake_lock, 2*HZ);
+/*                                                                                                                     */
 	return rc;
 
 clk_enable_failed:
@@ -364,6 +367,9 @@ vreg_config_failed:
 static int msm_csid_release(struct csid_device *csid_dev)
 {
 	uint32_t irq;
+/*                                                                                                                     */
+	wake_unlock(&csid_dev->csid_wake_lock);
+/*                                                                                                                     */
 
 	if (csid_dev->csid_state != CSID_POWER_UP) {
 		pr_err("%s: csid invalid state %d\n", __func__,
@@ -636,6 +642,9 @@ static int __devinit csid_probe(struct platform_device *pdev)
 	}
 
 	new_csid_dev->csid_state = CSID_POWER_DOWN;
+/*                                                                                                                     */
+	wake_lock_init(&new_csid_dev->csid_wake_lock, WAKE_LOCK_SUSPEND, "csid_wake_lock");
+/*                                                                                                                     */
 	return 0;
 
 csid_no_resource:

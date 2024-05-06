@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2013, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -313,14 +313,12 @@ static void slim_report(struct work_struct *work)
 			sbdrv->device_down(sbdev);
 		return;
 	}
-	if (sbdev->notified)
+	if (sbdev->notified || !sbdrv)
 		return;
 	ret = slim_get_logical_addr(sbdev, sbdev->e_addr, 6, &laddr);
 	if (!ret) {
-		if (sbdrv)
-			sbdev->notified = true;
-		if (sbdrv->device_up)
-			sbdrv->device_up(sbdev);
+		sbdev->notified = true;
+		sbdrv->device_up(sbdev);
 	}
 }
 
@@ -773,6 +771,15 @@ int slim_assign_laddr(struct slim_controller *ctrl, const u8 *e_addr,
 	u8 i = 0;
 	bool exists = false;
 	struct slim_device *sbdev;
+#ifdef CONFIG_SND_SOC_ES325_SLIM
+	/*              
+                                                                    
+                                
+ */
+	struct sbi_boardinfo *bi;
+	struct list_head *pos;
+#endif /* CONFIG_SND_SOC_ES325_SLIM */
+
 	mutex_lock(&ctrl->m_ctrl);
 	/* already assigned */
 	if (ctrl_getlogical_addr(ctrl, e_addr, e_len, &i) == 0) {
@@ -813,6 +820,22 @@ int slim_assign_laddr(struct slim_controller *ctrl, const u8 *e_addr,
 	}
 	ctrl->addrt[i].laddr = *laddr;
 
+#ifdef CONFIG_SND_SOC_ES325_SLIM
+	/*              
+                                                                    
+                                
+ */
+	list_for_each(pos, &board_list) {
+		bi = list_entry(pos, struct sbi_boardinfo, list);
+		if (memcmp(e_addr, bi->board_info.slim_slave->e_addr, 6) == 0) {
+			if (bi->board_info.slim_slave) {
+				bi->board_info.slim_slave->laddr = *laddr;
+				dev_dbg(&ctrl->dev, "es325 MLB: assigned la=%d to sbdev=%p\n",*laddr, bi->board_info.slim_slave);
+				break;
+			}
+		}
+	}
+#endif /* CONFIG_SND_SOC_ES325_SLIM */
 	dev_dbg(&ctrl->dev, "setting slimbus l-addr:%x\n", *laddr);
 ret_assigned_laddr:
 	mutex_unlock(&ctrl->m_ctrl);
@@ -1525,7 +1548,8 @@ static void slim_add_ch(struct slim_controller *ctrl, struct slim_ich *slc)
 	for (j = *len - 1; j > i; j--)
 		arr[j] = arr[j - 1];
 	arr[i] = slc;
-	ctrl->sched.usedslots += sl;
+	if (!ctrl->allocbw)
+		ctrl->sched.usedslots += sl;
 
 	return;
 }
@@ -2631,7 +2655,8 @@ static void slim_chan_changes(struct slim_device *sb, bool revert)
 				u32 sl = slc->seglen << slc->rootexp;
 				if (slc->coeff == SLIM_COEFF_3)
 					sl *= 3;
-				ctrl->sched.usedslots -= sl;
+				if (!ctrl->allocbw)
+					ctrl->sched.usedslots -= sl;
 				slim_remove_ch(ctrl, slc);
 				slc->state = SLIM_CH_DEFINED;
 			}
@@ -2652,7 +2677,8 @@ static void slim_chan_changes(struct slim_device *sb, bool revert)
 		if (revert || slc->def > 0) {
 			if (slc->coeff == SLIM_COEFF_3)
 				sl *= 3;
-			ctrl->sched.usedslots += sl;
+			if (!ctrl->allocbw)
+				ctrl->sched.usedslots += sl;
 			if (revert)
 				slc->def++;
 			slc->state = SLIM_CH_ACTIVE;
@@ -2746,7 +2772,8 @@ int slim_reconfigure_now(struct slim_device *sb)
 		u32 sl = slc->seglen << slc->rootexp;
 		if (slc->coeff == SLIM_COEFF_3)
 			sl *= 3;
-		ctrl->sched.usedslots -= sl;
+		if (!ctrl->allocbw)
+			ctrl->sched.usedslots -= sl;
 		slc->state = SLIM_CH_PENDING_REMOVAL;
 	}
 	list_for_each_entry(pch, &sb->mark_suspend, pending) {
@@ -3101,8 +3128,15 @@ int slim_ctrl_clk_pause(struct slim_controller *ctrl, bool wakeup, u8 restart)
 		 */
 		if (ctrl->clk_state == SLIM_CLK_PAUSED && ctrl->wakeup)
 			ret = ctrl->wakeup(ctrl);
+		/*
+		 * If wakeup fails, make sure that next attempt can succeed.
+		 * Since we already consumed pause_comp, complete it so
+		 * that next wakeup isn't blocked forever
+		 */
 		if (!ret)
 			ctrl->clk_state = SLIM_CLK_ACTIVE;
+		else
+			complete(&ctrl->pause_comp);
 		mutex_unlock(&ctrl->m_ctrl);
 		return ret;
 	} else {
