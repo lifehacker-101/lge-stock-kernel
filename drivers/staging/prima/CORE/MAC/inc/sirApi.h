@@ -1755,15 +1755,6 @@ typedef struct sSirSmeMicFailureInd
     tSirMicFailureInfo     info;
 } tSirSmeMicFailureInd, *tpSirSmeMicFailureInd;
 
-typedef struct sSirSmeLostLinkParamsInd
-{
-    tANI_U16  messageType;
-    tANI_U16  length;
-    tANI_U8 sessionId;
-    tSirLostLinkParamsInfo info;
-} tSirSmeLostLinkParamsInd, *tpSirSmeLostLinkParamsInd;
-
-
 typedef struct sSirSmeMissedBeaconInd
 {
     tANI_U16                    messageType; // eWNI_SME_MISSED_BEACON_IND
@@ -5095,8 +5086,6 @@ typedef PACKED_PRE struct PACKED_POST
 
 #endif /* WLAN_FEATURE_LINK_LAYER_STATS */
 
-
-
 #ifdef WLAN_FEATURE_EXTSCAN
 
 typedef enum
@@ -5599,13 +5588,4 @@ typedef struct
     tANI_U16   mesgLen;
     tSirMacAddr bssid;
 }tSirDelAllTdlsPeers, *ptSirDelAllTdlsPeers;
-
-typedef void (*tSirMonModeCb)(tANI_U32 *magic, struct completion *cmpVar);
-typedef struct
-{
-    tANI_U32 *magic;
-    struct completion *cmpVar;
-    void *data;
-    tSirMonModeCb callback;
-}tSirMonModeReq, *ptSirMonModeReq;
 #endif /* __SIR_API_H */

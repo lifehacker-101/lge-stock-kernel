@@ -731,7 +731,7 @@ static void wcd9xxx_clsh_enable_post_pa(struct snd_soc_codec *codec,
 	int i;
 	const struct wcd9xxx_reg_mask_val reg_set[] = {
 		{WCD9XXX_A_BUCK_MODE_5, 0x02, 0x00},
-		{WCD9XXX_A_NCP_STATIC, 0x20, 0x00},
+		{WCD9XXX_A_NCP_STATIC, 0x20, 0x20}, // HPH PA Mode Change(HW noise issue) : Class-H->Class-AB
 		{WCD9XXX_A_BUCK_MODE_3, 0x04, 0x04},
 	};
 

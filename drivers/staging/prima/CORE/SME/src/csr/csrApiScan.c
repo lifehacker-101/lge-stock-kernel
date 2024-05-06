@@ -939,6 +939,15 @@ eHalStatus csrScanRequest(tpAniSirGlobal pMac, tANI_U16 sessionId,
                  pScanCmd->u.scanCmd.scanID );
         csrReleaseCommandScan(pMac, pScanCmd);
     }
+// 2015.09.22, LG_Patch, Add scan log for debugging, kuhyun.kwon@lge.com
+    else {
+        printk("[wlan] Scan Request - SId=%d  Scan type=%u  numSSIDs=%d P2P search=%d",
+                             sessionId,
+                             pScanRequest->requestType,
+                             pScanRequest->SSIDs.numOfSSIDs,
+                             pScanRequest->p2pSearch);
+    }
+// 2015.09.22, LG_Patch, Add scan log for debugging, kuhyun.kwon@lge.com
 
     return (status);
 }
@@ -2579,6 +2588,11 @@ eHalStatus csrScanFilterResults(tpAniSirGlobal pMac)
             {
                 csrFreeScanResultEntry( pMac, pBssDesc );
             }
+        }
+        else
+        {
+            smsLog( pMac, LOG1, FL("%d is a Valid channel"),
+                    pBssDesc->Result.BssDescriptor.channelId);
         }
         pEntry = pTempEntry;
     }
@@ -8597,12 +8611,6 @@ eHalStatus csrScanSavePreferredNetworkFound(tpAniSirGlobal pMac,
       vos_mem_free(pParsedFrame);
       return eHAL_STATUS_RESOURCES;
    }
-
-    if ((macHeader->fc.type == SIR_MAC_MGMT_FRAME) &&
-        (macHeader->fc.subType == SIR_MAC_MGMT_PROBE_RSP))
-    {
-        pScanResult->Result.BssDescriptor.fProbeRsp = 1;
-    }
    //Add to scan cache
    csrScanAddResult(pMac, pScanResult, pIesLocal);
    pEntry = csrLLPeekHead( &pMac->scan.scanResultList, LL_ACCESS_LOCK );

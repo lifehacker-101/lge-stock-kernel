@@ -1556,6 +1556,8 @@ static int fib6_age(struct rt6_info *rt, void *arg)
 			__u8 neigh_flags = 0;
 
 			neigh = dst_neigh_lookup(&rt->dst, &rt->rt6i_gateway);
+			if (IS_ERR(neigh))
+				 return PTR_ERR(neigh);
 			if (neigh) {
 				neigh_flags = neigh->flags;
 				neigh_release(neigh);

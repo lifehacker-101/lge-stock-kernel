@@ -1,4 +1,4 @@
-/* Copyright (c) 2008-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2008-2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -43,9 +43,16 @@
 #include "diag_debugfs.h"
 #include "diag_masks.h"
 #include "diagfwd_bridge.h"
+#ifdef CONFIG_LGE_DIAG_USB_ACCESS_LOCK
+#include <mach/board_lge.h>
+#endif
 
 #include <linux/coresight-stm.h>
 #include <linux/kernel.h>
+
+#ifdef CONFIG_LGE_DIAG_BYPASS
+#include "lg_diag_bypass.h"
+#endif
 
 MODULE_DESCRIPTION("Diag Char Driver");
 MODULE_LICENSE("GPL v2");
@@ -261,19 +268,29 @@ fail:
 	return -ENOMEM;
 }
 
-static int diagchar_close(struct inode *inode, struct file *file)
+static int diag_remove_client_entry(struct file *file)
 {
 	int i = -1;
-	struct diagchar_priv *diagpriv_data = file->private_data;
+	struct diagchar_priv *diagpriv_data = NULL;
 
 	pr_debug("diag: process exit %s\n", current->comm);
-	if (!(file->private_data)) {
-		pr_alert("diag: Invalid file pointer");
-		return -ENOMEM;
-	}
 
 	if (!driver)
 		return -ENOMEM;
+
+	mutex_lock(&driver->diag_file_mutex);
+	if (!file) {
+		pr_debug("diag: Invalid file pointer\n");
+		mutex_unlock(&driver->diag_file_mutex);
+		return -ENOENT;
+	}
+	if (!(file->private_data)) {
+		pr_alert("diag: Invalid private data");
+		mutex_unlock(&driver->diag_file_mutex);
+		return -ENOMEM;
+	}
+
+	diagpriv_data = file->private_data;
 
 	/* clean up any DCI registrations, if this is a DCI client
 	* This will specially help in case of ungraceful exit of any DCI client
@@ -329,11 +346,19 @@ static int diagchar_close(struct inode *inode, struct file *file)
 			driver->client_map[i].pid = 0;
 			kfree(diagpriv_data);
 			diagpriv_data = NULL;
+			file->private_data = 0;
 			break;
 		}
 	}
 	mutex_unlock(&driver->diagchar_mutex);
+	mutex_unlock(&driver->diag_file_mutex);
 	return 0;
+}
+
+static int diagchar_close(struct inode *inode, struct file *file)
+{
+	pr_debug("diag: process exit %s\n", current->comm);
+	return diag_remove_client_entry(file);
 }
 
 int diag_find_polling_reg(int i)
@@ -1327,7 +1352,9 @@ drop:
 		data_type = driver->data_ready[index] & DEINIT_TYPE;
 		COPY_USER_SPACE_OR_EXIT(buf, data_type, 4);
 		driver->data_ready[index] ^= DEINIT_TYPE;
-		goto exit;
+		mutex_unlock(&driver->diagchar_mutex);
+		diag_remove_client_entry(file);
+		return ret;
 	}
 
 	if (driver->data_ready[index] & MSG_MASKS_TYPE) {
@@ -1450,6 +1477,12 @@ exit:
 			flush_workqueue(driver->smd_data[i].wq);
 		wake_up(&driver->smd_wait_q);
 	}
+
+#ifdef CONFIG_USB_G_LGE_ANDROID_DIAG_OSP_SUPPORT
+	driver->diag_read_status = 1;
+	wake_up_interruptible(&driver->diag_read_wait_q);
+#endif
+
 	return ret;
 }
 
@@ -1462,6 +1495,11 @@ static int diagchar_write(struct file *file, const char __user *buf,
 #ifdef DIAG_DEBUG
 	int length = 0, i;
 #endif
+
+#ifdef CONFIG_LGE_DM_APP
+	char *buf_cmp;
+#endif
+
 	struct diag_send_desc_type send = { NULL, NULL, DIAG_STATE_START, 0 };
 	struct diag_hdlc_dest_type enc = { NULL, NULL, 0 };
 	void *buf_copy = NULL;
@@ -1492,11 +1530,25 @@ static int diagchar_write(struct file *file, const char __user *buf,
 	    (!((pkt_type == DCI_DATA_TYPE) ||
 	       ((pkt_type & (DATA_TYPE_DCI_LOG | DATA_TYPE_DCI_EVENT)) == 0))
 		&& (driver->logging_mode == USB_MODE) &&
+#ifdef CONFIG_LGE_DIAG_BYPASS
+		(!driver->usb_connected) && (!lge_bypass_status()))) {
+#else
 		(!driver->usb_connected))) {
+#endif
 		/*Drop the diag payload */
 		return -EIO;
 	}
 #endif /* DIAG over USB */
+
+#ifdef CONFIG_LGE_DM_APP
+	if (driver->logging_mode == DM_APP_MODE) {
+		/* only diag cmd #250 for supporting testmode tool */
+		buf_cmp = (char *)buf + 4;
+		if (*(buf_cmp) != 0xFA)
+			return 0;
+	}
+#endif
+
 	if (pkt_type == DCI_DATA_TYPE) {
 		user_space_data = diagmem_alloc(driver, payload_size,
 								POOL_TYPE_USER);
@@ -2054,8 +2106,13 @@ static int diagchar_setup_cdev(dev_t devno)
 		return -1;
 	}
 
+#ifndef CONFIG_MACH_LGE
 	driver->diag_dev = device_create(driver->diagchar_class, NULL, devno,
 					 (void *)driver, "diag");
+#else
+	driver->diag_dev = device_create(driver->diagchar_class, NULL, devno,
+					 (void *)driver, "diag_lge");
+#endif
 
 	if (!driver->diag_dev)
 		return -EIO;
@@ -2118,6 +2175,104 @@ void diagfwd_bridge_fn(int type)
 inline void diagfwd_bridge_fn(int type) { }
 #endif
 
+#ifdef CONFIG_LGE_DIAG_USB_ACCESS_LOCK
+int user_diag_enable;
+#if defined(CONFIG_LGE_DIAG_USB_ACCESS_LOCK) && !defined(CONFIG_MACH_MSM8974_G3_SPR_US) && !defined(CONFIG_MACH_MSM8974_G2_SPR)
+#define DIAG_ENABLE	1
+#define DIAG_DISABLE	0
+#endif
+
+static ssize_t read_diag_enable(struct device *dev, struct device_attribute *attr,
+				   char *buf)
+{
+	int ret;
+
+	ret = sprintf(buf, "%d", user_diag_enable);
+
+	return ret;
+}
+static ssize_t write_diag_enable(struct device *dev,
+				    struct device_attribute *attr,
+				    const char *buf, size_t size)
+{
+    unsigned char string[2];
+
+    sscanf(buf, "%s", string);
+
+    if (!strncmp(string, "0", 1))
+    {
+    	user_diag_enable = 0;
+    }
+	else
+	{
+		user_diag_enable = 1;
+	}
+#if defined(CONFIG_LGE_DIAG_USB_ACCESS_LOCK) && !defined(CONFIG_MACH_MSM8974_G3_SPR_US) && !defined(CONFIG_MACH_MSM8974_G2_SPR)
+	if(lge_get_factory_boot()) {
+		printk("[FACTORY] force to diag enable, factory mode\n");
+		user_diag_enable = DIAG_ENABLE;
+	}
+#endif
+
+	printk("[%s] diag_enable: %d\n",__func__, user_diag_enable);
+
+	return size;
+}
+static DEVICE_ATTR(diag_enable, S_IRUGO | S_IWUSR, read_diag_enable, write_diag_enable);
+int lg_diag_create_file(struct platform_device *pdev)
+{
+    int ret;
+
+	ret = device_create_file(&pdev->dev, &dev_attr_diag_enable);
+	if (ret) {
+		device_remove_file(&pdev->dev, &dev_attr_diag_enable);
+		return ret;
+	}
+    return ret;
+}
+
+#if defined(CONFIG_LGE_DIAG_USB_ACCESS_LOCK) && !defined(CONFIG_MACH_MSM8974_G3_SPR_US) && !defined(CONFIG_MACH_MSM8974_G2_SPR)
+int get_diag_enable(void)
+{
+	if (lge_get_factory_boot())
+		user_diag_enable = DIAG_ENABLE;
+
+	return user_diag_enable;
+}
+EXPORT_SYMBOL(get_diag_enable);
+#endif
+
+int lg_diag_remove_file(struct platform_device *pdev)
+{
+	device_remove_file(&pdev->dev, &dev_attr_diag_enable);
+    return 0;
+}
+
+static int lg_diag_cmd_probe(struct platform_device *pdev)
+{
+	int ret;
+	ret = lg_diag_create_file(pdev);
+
+	return ret;
+}
+
+static int lg_diag_cmd_remove(struct platform_device *pdev)
+{
+	lg_diag_remove_file(pdev);
+
+	return 0;
+}
+
+static struct platform_driver lg_diag_cmd_driver = {
+	.probe		= lg_diag_cmd_probe,
+	.remove 	= lg_diag_cmd_remove,
+	.driver 	= {
+		.name = "lg_diag_cmd",
+		.owner	= THIS_MODULE,
+	},
+};
+#endif
+
 static int __init diagchar_init(void)
 {
 	dev_t dev;
@@ -2161,6 +2316,7 @@ static int __init diagchar_init(void)
 		driver->in_busy_pktdata = 0;
 		driver->in_busy_dcipktdata = 0;
 		mutex_init(&driver->diagchar_mutex);
+		mutex_init(&driver->diag_file_mutex);
 		init_waitqueue_head(&driver->wait_q);
 		init_waitqueue_head(&driver->smd_wait_q);
 		INIT_WORK(&(driver->diag_drain_work), diag_drain_work_fn);
@@ -2211,6 +2367,10 @@ static int __init diagchar_init(void)
 	}
 
 	pr_info("diagchar initialized now");
+
+#ifdef CONFIG_LGE_DIAG_USB_ACCESS_LOCK
+	platform_driver_register(&lg_diag_cmd_driver);
+#endif
 	return 0;
 
 fail:

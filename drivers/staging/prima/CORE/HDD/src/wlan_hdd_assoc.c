@@ -61,7 +61,9 @@
 #include "csrInsideApi.h"
 #include "wlan_hdd_p2p.h"
 #include <vos_sched.h>
+#ifdef FEATURE_WLAN_TDLS
 #include "wlan_hdd_tdls.h"
+#endif
 #include "sme_Api.h"
 #include "wlan_hdd_hostapd.h"
 #include "vos_utils.h"
@@ -1085,14 +1087,18 @@ static eHalStatus hdd_DisConnectHandler( hdd_adapter_t *pAdapter, tCsrRoamInfo *
                    cfg80211_disconnected(dev, WLAN_REASON_UNSPECIFIED, NULL, 0, GFP_KERNEL);
                }
             }
-
-            if (pAdapter->device_mode == WLAN_HDD_P2P_CLIENT)
-            {
-                hddLog(LOG1,
-                       FL("P2P client is getting removed and we are tryig to re-enable TDLS"));
-                wlan_hdd_tdls_reenable(pHddCtx);
+            if ((TRUE == pHddCtx->cfg_ini->fEnableTDLSSupport) &&
+                          (TRUE == sme_IsFeatureSupportedByFW(TDLS)) &&
+                          (eTDLS_SUPPORT_ENABLED == pHddCtx->tdls_mode_last ||
+                           eTDLS_SUPPORT_EXPLICIT_TRIGGER_ONLY ==
+                                           pHddCtx->tdls_mode_last)) {
+                if (pAdapter->device_mode != WLAN_HDD_INFRA_STATION)
+                    /* Enable TDLS support Once P2P session ends since
+                     * upond detection of concurrency TDLS would be disabled
+                     */
+                    wlan_hdd_tdls_set_mode(pHddCtx, pHddCtx->tdls_mode_last,
+                                           FALSE);
             }
-
             //If the Device Mode is Station
             // and the P2P Client is Connected
             //Enable BMPS
@@ -1556,10 +1562,9 @@ static eHalStatus hdd_AssociationCompletionHandler( hdd_adapter_t *pAdapter, tCs
     /* HDD has initiated disconnect, do not send connect result indication
      * to kernel as it will be handled by __cfg80211_disconnect.
      */
-    if (((eConnectionState_Disconnecting == pHddStaCtx->conn_info.connState) ||
-        (eConnectionState_NotConnected == pHddStaCtx->conn_info.connState)) &&
-        ((eCSR_ROAM_RESULT_ASSOCIATED == roamResult) ||
-        (eCSR_ROAM_ASSOCIATION_FAILURE == roamStatus)))
+    if(( eConnectionState_Disconnecting == pHddStaCtx->conn_info.connState) &&
+        (( eCSR_ROAM_RESULT_ASSOCIATED == roamResult) ||
+        ( eCSR_ROAM_ASSOCIATION_FAILURE == roamStatus)) )
     {
         VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO,
                FL(" Disconnect from HDD in progress "));
@@ -1954,14 +1959,6 @@ static eHalStatus hdd_AssociationCompletionHandler( hdd_adapter_t *pAdapter, tCs
          * completed operation - with a ASSOCIATION_FAILURE status.*/
         if ( eCSR_ROAM_ASSOCIATION_FAILURE == roamStatus &&  !hddDisconInProgress )
         {
-
-            if (pAdapter->device_mode == WLAN_HDD_P2P_CLIENT)
-            {
-                hddLog(LOG1,
-                       FL("Assoication Failure for P2P client and we are trying to re-enable TDLS"));
-                wlan_hdd_tdls_reenable(pHddCtx);
-            }
-
             if (pRoamInfo)
                 hddLog(VOS_TRACE_LEVEL_ERROR,
                      "%s: send connect failure to nl80211:"
@@ -3323,18 +3320,7 @@ eHalStatus hdd_smeRoamCallback( void *pContext, tCsrRoamInfo *pRoamInfo, tANI_U3
         case eCSR_ROAM_MIC_ERROR_IND:
             halStatus = hdd_RoamMicErrorIndicationHandler( pAdapter, pRoamInfo, roamId, roamStatus, roamResult );
             break;
-        case eCSR_ROAM_LOST_LINK_PARAMS_IND:
-            {
-                /*
-                 * The RSSI will be subtracted from 100 as FW is sending the RSSI by
-                 * adding the 100 value.
-                 */
-                pAdapter->rssi_on_disconnect = pRoamInfo->u.pLostLinkParams->rssi - 100;
-                VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO,
-                    "%s : Rssi on Disconnect : %d",
-                    __func__, pAdapter->rssi_on_disconnect);
-                break;
-            }
+
         case eCSR_ROAM_SET_KEY_COMPLETE:
             {
                 hdd_context_t* pHddCtx = (hdd_context_t*)pAdapter->pHddCtx;
@@ -4167,46 +4153,8 @@ int __iw_set_essid(struct net_device *dev,
         hdd_select_cbmode(pAdapter,
             (WLAN_HDD_GET_CTX(pAdapter))->cfg_ini->AdHocChannel5G);
     }
-   /*
-    * Change conn_state to connecting before sme_RoamConnect(),
-    * because sme_RoamConnect() has a direct path to call
-    * hdd_smeRoamCallback(), which will change the conn_state
-    * If direct path, conn_state will be accordingly changed
-    * to NotConnected or Associated by either
-    * hdd_AssociationCompletionHandler() or hdd_DisConnectHandler()
-    * in sme_RoamCallback()
-    * if sme_RomConnect is to be queued,
-    * Connecting state will remain until it is completed.
-    *
-    * If connection state is not changed,
-    * connection state will remain in eConnectionState_NotConnected state.
-    * In hdd_AssociationCompletionHandler, "hddDisconInProgress" is set to true
-    * if conn state is eConnectionState_NotConnected.
-    * If "hddDisconInProgress" is set to true then cfg80211 layer is not
-    * informed of connect result indication which is an issue.
-    */
-    if (WLAN_HDD_INFRA_STATION == pAdapter->device_mode ||
-            WLAN_HDD_P2P_CLIENT == pAdapter->device_mode)
-    {
-        VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO,
-                   FL("Set HDD connState to eConnectionState_Connecting"));
-        hdd_connSetConnectionState(WLAN_HDD_GET_STATION_CTX_PTR(pAdapter),
-                                                 eConnectionState_Connecting);
-    }
     status = sme_RoamConnect( hHal,pAdapter->sessionId,
                          &(pWextState->roamProfile), &roamId);
-
-    if ((eHAL_STATUS_SUCCESS != status) &&
-        (WLAN_HDD_INFRA_STATION == pAdapter->device_mode ||
-        WLAN_HDD_P2P_CLIENT == pAdapter->device_mode))
-    {
-        hddLog(VOS_TRACE_LEVEL_ERROR,
-               FL("sme_RoamConnect (session %d) failed with status %d. -> NotConnected"),
-                            pAdapter->sessionId, status);
-            /* change back to NotAssociated */
-        hdd_connSetConnectionState(WLAN_HDD_GET_STATION_CTX_PTR(pAdapter),
-                                             eConnectionState_NotConnected);
-    }
     pRoamProfile->ChannelInfo.ChannelList = NULL;
     pRoamProfile->ChannelInfo.numOfChannels = 0;
 

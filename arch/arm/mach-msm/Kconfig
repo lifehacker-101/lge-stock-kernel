@@ -1140,6 +1140,7 @@ config MACH_FSM9XXX_SURF
 
 endmenu
 
+source "arch/arm/mach-msm/lge/Kconfig"
 config MSM_STACKED_MEMORY
 	bool "Stacked Memory"
 	default y
@@ -2304,16 +2305,6 @@ config SCORPION_Uni_45nm_BUG
 	  workaround for Scorpion Uniprocessor 45nm cores.
 
 	  This bug is not applicable to any ScorpionMP or Scorpion Uni 65nm(SC65U) cores.
-
-config MSM_BUSPM_DEV
-	tristate "MSM Bus Performance Monitor Kernel Module"
-	depends on MSM_BUS_SCALING
-	default n
-	help
-	  This kernel module is used to mmap() hardware registers for the
-	  performance monitors, counters, etc. The module can also be used to
-	  allocate physical memory which is used by bus performance hardware to
-	  dump performance data.
 
 config MSM_TZ_LOG
 	tristate "MSM Trust Zone (TZ) Log Driver"

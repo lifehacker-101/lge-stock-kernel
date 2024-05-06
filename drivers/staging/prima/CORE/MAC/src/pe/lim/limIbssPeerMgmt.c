@@ -205,7 +205,7 @@ ibss_peer_collect(
 
     /* Collect peer VHT capabilities based on the received beacon from the peer */
 #ifdef WLAN_FEATURE_11AC
-    if (IS_BSS_VHT_CAPABLE(pBeacon->VHTCaps))
+    if ( pBeacon->VHTCaps.present )
     {
         pPeer->vhtSupportedChannelWidthSet = pBeacon->VHTOperation.chanWidth;
         pPeer->vhtCapable = pBeacon->VHTCaps.present;

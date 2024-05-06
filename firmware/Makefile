@@ -12,7 +12,7 @@ fw-external-y := $(subst ",,$(CONFIG_EXTRA_FIRMWARE))
 # There are three cases to care about:
 # 1. Building kernel with CONFIG_FIRMWARE_IN_KERNEL=y -- $(fw-shipped-y) should
 #    include the firmware files to include, according to .config
-# 2. 'make modules_install', which will install firmware for modules, and 
+# 2. 'make modules_install', which will install firmware for modules, and
 #    _also_ for the in-kernel drivers when CONFIG_FIRMWARE_IN_KERNEL=n
 # 3. 'make firmware_install', which installs all firmware, unconditionally.
 
@@ -26,6 +26,49 @@ fw-shipped- += acenic/tg1.bin
 else
 acenic-objs := acenic/tg1.bin acenic/tg2.bin
 endif
+
+ifdef CONFIG_MACH_MSM8974_T1_ATT
+atmel_fw_file := $(wildcard $(srctree)/firmware/atmel/$(TARGET_PRODUCT)/*.fw)
+atmel_fw_files := $(subst $(srctree)/firmware/,,$(atmel_fw_file))
+
+fw-shipped-$(CONFIG_TOUCHSCREEN_ATMEL_2954) += $(atmel_fw_files)
+endif
+
+ifdef CONFIG_MACH_MSM8974_T1LTE_GLOBAL_COM
+atmel_fw_file := $(wildcard $(srctree)/firmware/atmel/$(TARGET_PRODUCT)/*.fw)
+$(foreach var, $(atmel_fw_file),  $(shell objcopy -I binary -O ihex $(var) $(var).ihex))
+atmel_ihex_list := $(subst .ihex, , $(notdir $(wildcard $(srctree)/firmware/atmel/$(TARGET_PRODUCT)/*.ihex)))
+atmel_ihex_files := $(foreach var, $(atmel_ihex_list), atmel/$(TARGET_PRODUCT)/$(var))
+
+fw-shipped-$(CONFIG_TOUCHSCREEN_ATMEL_mxT2954) += $(atmel_ihex_files)
+endif
+
+ifdef CONFIG_MACH_MSM8974_T1WIFI_GLOBAL_COM
+atmel_fw_file := $(wildcard $(srctree)/firmware/atmel/$(TARGET_PRODUCT)/*.fw)
+$(foreach var, $(atmel_fw_file),  $(shell objcopy -I binary -O ihex $(var) $(var).ihex))
+atmel_ihex_list := $(subst .ihex, , $(notdir $(wildcard $(srctree)/firmware/atmel/$(TARGET_PRODUCT)/*.ihex)))
+atmel_ihex_files := $(foreach var, $(atmel_ihex_list), atmel/$(TARGET_PRODUCT)/$(var))
+
+fw-shipped-$(CONFIG_TOUCHSCREEN_ATMEL_mxT2954) += $(atmel_ihex_files)
+endif
+
+ifdef CONFIG_MACH_MSM8974_T1WIFIN_GLOBAL_COM
+atmel_fw_file := $(wildcard $(srctree)/firmware/atmel/$(TARGET_PRODUCT)/*.fw)
+$(foreach var, $(atmel_fw_file),  $(shell objcopy -I binary -O ihex $(var) $(var).ihex))
+atmel_ihex_list := $(subst .ihex, , $(notdir $(wildcard $(srctree)/firmware/atmel/$(TARGET_PRODUCT)/*.ihex)))
+atmel_ihex_files := $(foreach var, $(atmel_ihex_list), atmel/$(TARGET_PRODUCT)/$(var))
+
+fw-shipped-$(CONFIG_TOUCHSCREEN_ATMEL_mxT2954) += $(atmel_ihex_files)
+endif
+
+ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_FW_PATH
+fwpath := $(subst ",,$(CONFIG_TOUCHSCREEN_SYNAPTICS_FW_PATH))
+synaptics_img_file := $(wildcard $(srctree)/firmware/synaptics/$(fwpath)/*.img)
+synaptics_img_file += $(wildcard $(srctree)/firmware/synaptics/$(fwpath)/*.txt)
+endif
+synaptics_firmware := $(subst $(srctree)/firmware/,,$(synaptics_img_file))
+
+fw-shipped-$(CONFIG_TOUCHSCREEN_SYNAPTICS_I2C_RMI4) += $(synaptics_firmware)
 fw-shipped-$(CONFIG_3C359) += 3com/3C359.bin
 fw-shipped-$(CONFIG_ACENIC) += $(acenic-objs)
 fw-shipped-$(CONFIG_ADAPTEC_STARFIRE) += adaptec/starfire_rx.bin \
@@ -141,6 +184,15 @@ fw-shipped-$(CONFIG_USB_VICAM) += vicam/firmware.fw
 fw-shipped-$(CONFIG_VIDEO_CPIA2) += cpia2/stv0672_vp4.bin
 fw-shipped-$(CONFIG_YAM) += yam/1200.bin yam/9600.bin
 
+# ATMF04
+ifdef CONFIG_MACH_MSM8974_T1_ATT
+fw-shipped-$(CONFIG_SENSOR_ATMF04) += atmf04/atmf04_t1_V0.59.fw
+endif
+
+ifdef CONFIG_MACH_MSM8974_T1LTE_GLOBAL_COM
+fw-shipped-$(CONFIG_SENSOR_ATMF04) += atmf04/atmf04_t1_V0.59.fw
+endif
+
 fw-shipped-all := $(fw-shipped-y) $(fw-shipped-m) $(fw-shipped-)
 
 # Directories which we _might_ need to create, so we have a rule for them.
@@ -151,6 +203,9 @@ quiet_cmd_mkdir = MKDIR   $(patsubst $(objtree)/%,%,$@)
 
 quiet_cmd_ihex  = IHEX    $@
       cmd_ihex  = $(OBJCOPY) -Iihex -Obinary $< $@
+
+quiet_cmd_copy  = COPY    $@
+      cmd_copy  = cp -u $(srctree)/$@ $@
 
 quiet_cmd_ihex2fw  = IHEX2FW $@
       cmd_ihex2fw  = $(objtree)/$(obj)/ihex2fw $< $@
@@ -199,6 +254,11 @@ $(objtree)/$$(%) $(objtree)/$(obj)/$$(%): $(firmware-dirs)
 # For the $$(dir %) trick, where we need % to be expanded first.
 .SECONDEXPANSION:
 
+ifneq ($(objtree),$(srctree))
+$(patsubst %,$(obj)/%, $(fw-shipped-y)): %: %.gen.S
+	$(call cmd,copy)
+endif
+
 $(patsubst %,$(obj)/%.gen.S, $(fw-shipped-y)): %: $(wordsize_deps) \
 		| $(objtree)/$$(dir %)
 	$(call cmd,fwbin,$(patsubst %.gen.S,%,$@))
@@ -218,7 +278,7 @@ $(obj)/%: $(obj)/%.ihex | $(objtree)/$(obj)/$$(dir %)
 # Don't depend on ihex2fw if we're installing and it already exists.
 # Putting it after | in the dependencies doesn't seem sufficient when
 # we're installing after a cross-compile, because ihex2fw has dependencies
-# on stuff like /usr/lib/gcc/ppc64-redhat-linux/4.3.0/include/stddef.h and 
+# on stuff like /usr/lib/gcc/ppc64-redhat-linux/4.3.0/include/stddef.h and
 # thus wants to be rebuilt. Which it can't be, if the prebuilt kernel tree
 # is exported read-only for someone to run 'make install'.
 ifeq ($(INSTALL):$(wildcard $(obj)/ihex2fw),install:$(obj)/ihex2fw)

@@ -3062,14 +3062,6 @@ REG_VARIABLE( CFG_EXTSCAN_ENABLE, WLAN_PARAM_Integer,
                   CFG_IGNORE_PEER_ERP_INFO_MIN,
                   CFG_IGNORE_PEER_ERP_INFO_MAX ),
 
-   REG_VARIABLE( CFG_IGNORE_PEER_HT_MODE_NAME, WLAN_PARAM_Integer,
-                  hdd_config_t, ignorePeerHTopMode,
-                  VAR_FLAGS_OPTIONAL |
-                  VAR_FLAGS_RANGE_CHECK_ASSUME_DEFAULT,
-                  CFG_IGNORE_PEER_HT_MODE_DEFAULT,
-                  CFG_IGNORE_PEER_HT_MODE_MIN,
-                  CFG_IGNORE_PEER_HT_MODE_MAX ),
-
    REG_VARIABLE(CFG_INITIAL_DWELL_TIME_NAME, WLAN_PARAM_Integer,
                hdd_config_t, nInitialDwellTime,
                VAR_FLAGS_OPTIONAL | VAR_FLAGS_RANGE_CHECK_ASSUME_DEFAULT,
@@ -3148,13 +3140,6 @@ REG_VARIABLE( CFG_EXTSCAN_ENABLE, WLAN_PARAM_Integer,
                 CFG_ENABLE_MAC_ADDR_SPOOFING_DEFAULT,
                 CFG_ENABLE_MAC_ADDR_SPOOFING_MIN,
                 CFG_ENABLE_MAC_ADDR_SPOOFING_MAX),
-
-   REG_VARIABLE(CFG_DISABLE_P2P_MAC_ADDR_SPOOFING, WLAN_PARAM_Integer,
-                hdd_config_t, disableP2PMacSpoofing,
-                VAR_FLAGS_OPTIONAL | VAR_FLAGS_RANGE_CHECK_ASSUME_DEFAULT,
-                CFG_DISABLE_P2P_MAC_ADDR_SPOOFING_DEFAULT,
-                CFG_DISABLE_P2P_MAC_ADDR_SPOOFING_MIN,
-                CFG_DISABLE_P2P_MAC_ADDR_SPOOFING_MAX),
 
    REG_VARIABLE(CFG_ENABLE_MGMT_LOGGING, WLAN_PARAM_Integer,
                 hdd_config_t, enableMgmtLogging,
@@ -3389,13 +3374,6 @@ REG_VARIABLE( CFG_EXTSCAN_ENABLE, WLAN_PARAM_Integer,
                  CFG_LINK_FAIL_TX_CNT_DEF,
                  CFG_LINK_FAIL_TX_CNT_MIN,
                  CFG_LINK_FAIL_TX_CNT_MAX ),
-   REG_VARIABLE( CFG_OPTIMIZE_CA_EVENT_NAME, WLAN_PARAM_Integer,
-                 hdd_config_t, gOptimizeCAevent,
-                 VAR_FLAGS_OPTIONAL | VAR_FLAGS_RANGE_CHECK_ASSUME_DEFAULT,
-                 CFG_OPTIMIZE_CA_EVENT_DEFAULT,
-                 CFG_OPTIMIZE_CA_EVENT_DISABLE,
-                 CFG_OPTIMIZE_CA_EVENT_ENABLE ),
-
 };
 
 /*
@@ -3527,7 +3505,7 @@ VOS_STATUS hdd_parse_config_ini(hdd_context_t* pHddCtx)
       goto config_exit;
    }
 
-   hddLog(VOS_TRACE_LEVEL_INFO , "%s: qcom_cfg.ini Size %zu", __func__, fw->size);
+   hddLog(LOGE, "%s: qcom_cfg.ini Size %zu", __func__, fw->size);
 
    buffer = (char*)vos_mem_vmalloc(fw->size);
 
@@ -3804,17 +3782,14 @@ static void print_hdd_cfg(hdd_context_t *pHddCtx)
   VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH,
                     "Name = [gIgnorePeerErpInfo] Value = [%u] ",
                                            pHddCtx->cfg_ini->ignorePeerErpInfo);
-  VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH,
-                    "Name = [disableP2PMacSpoofing] Value = [%u] ",
-                                       pHddCtx->cfg_ini->disableP2PMacSpoofing);
   VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH, "Name = [gRoamtoDFSChannel] Value = [%u] ",pHddCtx->cfg_ini->allowDFSChannelRoam);
   VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH, "Name = [gMaxConcurrentActiveSessions] Value = [%u] ", pHddCtx->cfg_ini->gMaxConcurrentActiveSessions);
 #ifdef WLAN_FEATURE_AP_HT40_24G
   VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH, "Name = [gApHT4024G] Value = [%u]", pHddCtx->cfg_ini->apHT40_24GEnabled);
 #endif
   VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH, "Name = [gAcsScanBandPreference] Value = [%u] ",pHddCtx->cfg_ini->acsScanBandPreference);
-  VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH, "Name = [gACSBandSwitchThreshold] value = [%u]",pHddCtx->cfg_ini->acsBandSwitchThreshold);
-  VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH, "Name = [gDeferScanTimeInterval] value = [%u]",pHddCtx->cfg_ini->nDeferScanTimeInterval);
+  VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH, "Name = [gACSBandSwitchThreshold] value = [%u]\n",pHddCtx->cfg_ini->acsBandSwitchThreshold);
+  VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH, "Name = [gDeferScanTimeInterval] value = [%u]\n",pHddCtx->cfg_ini->nDeferScanTimeInterval);
   VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH, "Name = [gEnableTDLSScan] value = [%u]\n",pHddCtx->cfg_ini->fEnableTDLSScan);
   VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH, "Name = [gDxeReplenishRXTimerVal] Value = [%u] ", pHddCtx->cfg_ini->dxeReplenishRXTimerVal);
   VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH, "Name = [gDxeSSREnable] Value = [%u] ", pHddCtx->cfg_ini->dxeSSREnable);
@@ -5372,14 +5347,6 @@ v_BOOL_t hdd_update_config_dat( hdd_context_t *pHddCtx )
       fStatus = FALSE;
       hddLog(LOGE, "Could not pass on WNI_CFG_LINK_FAIL_TX_CNT ");
    }
-   if (ccmCfgSetInt(pHddCtx->hHal, WNI_CFG_OPTIMIZE_CA_EVENT,
-                    pConfig->gOptimizeCAevent, NULL,
-                    eANI_BOOLEAN_FALSE) == eHAL_STATUS_FAILURE)
-   {
-      fStatus = FALSE;
-      hddLog(LOGE, "Could not pass on WNI_CFG_OPTIMIZE_CA_EVENT ");
-   }
-
    return fStatus;
 }
 
@@ -5612,8 +5579,6 @@ VOS_STATUS hdd_set_sme_config( hdd_context_t *pHddCtx )
        smeConfig->csrConfig.nSelect5GHzMargin = pConfig->nSelect5GHzMargin;
    }
    smeConfig->csrConfig.ignorePeerErpInfo = pConfig->ignorePeerErpInfo;
-   smeConfig->csrConfig.ignorePeerHTopMode = pConfig->ignorePeerHTopMode;
-   smeConfig->csrConfig.disableP2PMacSpoofing = pConfig->disableP2PMacSpoofing;
    smeConfig->csrConfig.initialScanSkipDFSCh = pConfig->initialScanSkipDFSCh;
 
    smeConfig->csrConfig.isCoalesingInIBSSAllowed =

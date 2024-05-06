@@ -151,7 +151,6 @@ defMsgDecision(tpAniSirGlobal pMac, tpSirMsgQ  limMsg)
         (limMsg->type != WDA_START_OEM_DATA_RSP) &&
 #endif
         (limMsg->type != WDA_ADD_TS_RSP) &&
-        (limMsg->type != WDA_LOST_LINK_PARAMS_IND) &&
         /* Allow processing of RX frames while awaiting reception of
            ADD TS response over the air. This logic particularly handles the
            case when host sends ADD BA request to FW after ADD TS request
@@ -578,7 +577,7 @@ limProcessEXTScanRealTimeData(tpAniSirGlobal pMac, tANI_U8 *pRxPacketInfo)
         if ( DOT11F_FAILED( status ) )
         {
             limLog(pMac, LOGE, FL("Failed to parse a Beacons"
-                        "(%d)"), status);
+                        "(%d):\n"), status);
             vos_mem_free(pBeacon);
             return;
         }
@@ -616,7 +615,7 @@ limProcessEXTScanRealTimeData(tpAniSirGlobal pMac, tANI_U8 *pRxPacketInfo)
         if ( DOT11F_FAILED( status ) )
         {
             limLog(pMac, LOGE, FL("Failed to parse a Probe"
-                        "Response (%d"), status);
+                        "Response (%d:\n"), status);
             vos_mem_free(pProbeResponse);
             return;
         }
@@ -632,8 +631,10 @@ limProcessEXTScanRealTimeData(tpAniSirGlobal pMac, tANI_U8 *pRxPacketInfo)
                                     pProbeResponse->BeaconInterval.interval;
         tEXTScanFullScanResult.ap.capability =
                             *(((tANI_U16 *)&pProbeResponse->Capabilities));
-
-        vos_mem_free(pBeacon);
+// QCT_CASE_START #02332168
+//        vos_mem_free(pBeacon);
+        vos_mem_free(pProbeResponse);
+// QCT_CASE_END #02332168
     }
     else
     {
@@ -1754,11 +1755,7 @@ limProcessMessages(tpAniSirGlobal pMac, tpSirMsgQ  limMsg)
            limMsg->bodyptr = NULL;
            break;
     
-        case WDA_LOST_LINK_PARAMS_IND:
-            limProcessLostLinkParamsInd(pMac,limMsg);
-            vos_mem_free(limMsg->bodyptr);
-            limMsg->bodyptr = NULL;
-            break;
+
 
         case SIR_LIM_ADDTS_RSP_TIMEOUT:
             limProcessSmeReqMessages(pMac,limMsg);
@@ -2171,7 +2168,7 @@ limProcessMessages(tpAniSirGlobal pMac, tpSirMsgQ  limMsg)
                                                      pTdlsLinkEstablishParams->staIdx,
                                                      &sessionId))== NULL)
             {
-                limLog(pMac, LOGE, FL("session %u  does not exist"), sessionId);
+                limLog(pMac, LOGE, FL("session %u  does not exist.\n"), sessionId);
                 /* Still send the eWNI_SME_TDLS_LINK_ESTABLISH_RSP message to SME
                    with session id as zero and status as FAILURE so, that message
                    queued in SME queue can be freed to prevent the SME cmd buffer leak */
@@ -2205,7 +2202,7 @@ limProcessMessages(tpAniSirGlobal pMac, tpSirMsgQ  limMsg)
                                                      pTdlsChanSwitchParams->staIdx,
                                                      &sessionId))== NULL)
             {
-                limLog(pMac, LOGE, FL("session %u  does not exist"), sessionId);
+                limLog(pMac, LOGE, FL("session %u  does not exist.\n"), sessionId);
                 /* Still send the eWNI_SME_TDLS_LINK_ESTABLISH_RSP message to SME
                    with session id as zero and status as FAILURE so, that message
                    queued in SME queue can be freed to prevent the SME cmd buffer leak */

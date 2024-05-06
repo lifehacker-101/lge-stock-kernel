@@ -1952,9 +1952,6 @@ eHalStatus csrChangeDefaultConfigParam(tpAniSirGlobal pMac, tCsrConfigParam *pPa
         pMac->roam.configParam.isAmsduSupportInAMPDU = pParam->isAmsduSupportInAMPDU;
         pMac->roam.configParam.nSelect5GHzMargin = pParam->nSelect5GHzMargin;
         pMac->roam.configParam.ignorePeerErpInfo = pParam->ignorePeerErpInfo;
-        pMac->roam.configParam.ignorePeerHTopMode = pParam->ignorePeerHTopMode;
-        pMac->roam.configParam.disableP2PMacSpoofing =
-                                        pParam->disableP2PMacSpoofing;
         pMac->roam.configParam.isCoalesingInIBSSAllowed =
                                pParam->isCoalesingInIBSSAllowed;
         pMac->roam.configParam.allowDFSChannelRoam = pParam->allowDFSChannelRoam;
@@ -2102,9 +2099,6 @@ eHalStatus csrGetConfigParam(tpAniSirGlobal pMac, tCsrConfigParam *pParam)
         pParam->isAmsduSupportInAMPDU = pMac->roam.configParam.isAmsduSupportInAMPDU;
         pParam->nSelect5GHzMargin = pMac->roam.configParam.nSelect5GHzMargin;
         pParam->ignorePeerErpInfo = pMac->roam.configParam.ignorePeerErpInfo;
-        pParam->ignorePeerHTopMode = pMac->roam.configParam.ignorePeerHTopMode;
-        pParam->disableP2PMacSpoofing =
-                                pMac->roam.configParam.disableP2PMacSpoofing;
 
         pParam->isCoalesingInIBSSAllowed =
                                 pMac->roam.configParam.isCoalesingInIBSSAllowed;
@@ -3590,33 +3584,37 @@ static eHalStatus csrGetRateSet( tpAniSirGlobal pMac,  tCsrRoamProfile *pProfile
             {
                 if ( csrRatesIsDot11RateSupported( pMac, pIes->SuppRates.rates[ i ] ) ) 
                 {
-                    if ( !csrIsRateAlreadyPresent(pIes->SuppRates.rates[ i ], rateBitmap) )
-                    {
-                        csrAddRateBitmap(pIes->SuppRates.rates[ i ], &rateBitmap);
-                        *pDstRate++ = pIes->SuppRates.rates[ i ];
-                        pOpRateSet->numRates++;
-                    }
+                    csrAddRateBitmap(pIes->SuppRates.rates[ i ], &rateBitmap);
+                    *pDstRate++ = pIes->SuppRates.rates[ i ];
+                    pOpRateSet->numRates++;
                 }
             }
         }
-        /* If there are Extended Rates in the beacon, we will reflect those
-         * extended rates that we support in out Extended Operational Rate
-         * set*/
-        pDstRate = pExRateSet->rate;
-        if(pIes->ExtSuppRates.present)
+        if ( eCSR_CFG_DOT11_MODE_11G == cfgDot11Mode || 
+             eCSR_CFG_DOT11_MODE_11N == cfgDot11Mode ||
+             eCSR_CFG_DOT11_MODE_TAURUS == cfgDot11Mode ||
+             eCSR_CFG_DOT11_MODE_ABG == cfgDot11Mode ||
+#ifdef WLAN_FEATURE_11AC
+             eCSR_CFG_DOT11_MODE_11AC == cfgDot11Mode
+#endif
+        )
         {
-            for (i = 0; i < pIes->ExtSuppRates.num_rates; i++)
+            // If there are Extended Rates in the beacon, we will reflect those
+            // extended rates that we support in out Extended Operational Rate
+            // set:
+            pDstRate = pExRateSet->rate;
+            if(pIes->ExtSuppRates.present)
             {
-                if (csrRatesIsDot11RateSupported(pMac,
-                                    pIes->ExtSuppRates.rates[ i ]))
+                for ( i = 0; i < pIes->ExtSuppRates.num_rates; i++ ) 
                 {
-                    if (!csrIsRateAlreadyPresent(pIes->ExtSuppRates.rates[i],
-                                                                  rateBitmap))
+                    if ( csrRatesIsDot11RateSupported( pMac, pIes->ExtSuppRates.rates[ i ] ) ) 
                     {
-                        csrAddRateBitmap(pIes->ExtSuppRates.rates[i],
-                                                               &rateBitmap);
-                        *pDstRate++ = pIes->ExtSuppRates.rates[i];
-                        pExRateSet->numRates++;
+                        if (!csrIsRateAlreadyPresent(pIes->ExtSuppRates.rates[ i ], rateBitmap))
+                        {
+                            csrAddRateBitmap(pIes->ExtSuppRates.rates[ i ], &rateBitmap);
+                            *pDstRate++ = pIes->ExtSuppRates.rates[ i ];
+                            pExRateSet->numRates++;
+                        }
                     }
                 }
             }
@@ -8611,18 +8609,6 @@ void csrRoamingStateMsgProcessor( tpAniSirGlobal pMac, void *pMsgBuf )
                                 eCSR_ROAM_CONNECT_STATUS_UPDATE, 
                                 eCSR_ROAM_RESULT_IBSS_PEER_DEPARTED);
             break;
-        case eWNI_SME_LOST_LINK_PARAMS_IND:
-            {
-                tpSirSmeLostLinkParamsInd pLostLinkParamsInd = (tpSirSmeLostLinkParamsInd)pSmeRsp;
-                tCsrRoamInfo roamInfo, *pRoamInfo = NULL;
-                eCsrRoamResult result = eCSR_ROAM_RESULT_NONE;
-                vos_mem_set(&roamInfo, sizeof(tCsrRoamInfo), 0);
-                roamInfo.u.pLostLinkParams = &pLostLinkParamsInd->info;
-                pRoamInfo = &roamInfo;
-                csrRoamCallCallback(pMac, pLostLinkParamsInd->sessionId,
-                               pRoamInfo, 0, eCSR_ROAM_LOST_LINK_PARAMS_IND, result);
-                break;
-            }
         default:
             smsLog(pMac, LOG1,
                    FL("Unexpected message type = %d[0x%X] received in substate %s"),
@@ -9916,18 +9902,6 @@ void csrRoamCheckForLinkStatusChange( tpAniSirGlobal pMac, tSirSmeRsp *pSirMsg )
                 }
             }
             break;
-        case eWNI_SME_LOST_LINK_PARAMS_IND:
-            {
-                tpSirSmeLostLinkParamsInd pLostLinkParamsInd = (tpSirSmeLostLinkParamsInd)pSirMsg;
-                tCsrRoamInfo roamInfo, *pRoamInfo = NULL;
-                eCsrRoamResult result = eCSR_ROAM_RESULT_NONE;
-                vos_mem_set(&roamInfo, sizeof(tCsrRoamInfo), 0);
-                roamInfo.u.pLostLinkParams = &pLostLinkParamsInd->info;
-                pRoamInfo = &roamInfo;
-                csrRoamCallCallback(pMac, pLostLinkParamsInd->sessionId,
-                                   pRoamInfo, 0, eCSR_ROAM_LOST_LINK_PARAMS_IND, result);
-                break;
-            }
         case eWNI_SME_MIC_FAILURE_IND:
             {
                 tpSirSmeMicFailureInd pMicInd = (tpSirSmeMicFailureInd)pSirMsg;
@@ -13586,12 +13560,10 @@ eHalStatus csrSendJoinReqMsg( tpAniSirGlobal pMac, tANI_U32 sessionId, tSirBssDe
         pBuf++;
 
         // txBFCsnValue
-        if (IS_BSS_VHT_CAPABLE(pIes->VHTCaps))
+        txBFCsnValue = (tANI_U8)pMac->roam.configParam.txBFCsnValue;
+        if (pIes->VHTCaps.present && pIes->VHTCaps.numSoundingDim)
         {
-            txBFCsnValue = (tANI_U8)pMac->roam.configParam.txBFCsnValue;
-            if (pIes->VHTCaps.numSoundingDim)
-               txBFCsnValue = CSR_ROAM_MIN
-                  (txBFCsnValue, pIes->VHTCaps.numSoundingDim);
+            txBFCsnValue = CSR_ROAM_MIN(txBFCsnValue, pIes->VHTCaps.numSoundingDim);
         }
         *pBuf = txBFCsnValue;
         pBuf++;

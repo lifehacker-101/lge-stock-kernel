@@ -978,8 +978,7 @@ eHalStatus pmcRequestFullPower (tHalHandle hHal, void (*callbackRoutine) (void *
                                 void *callbackContext, tRequestFullPowerReason fullPowerReason)
 {
     tpAniSirGlobal pMac = PMAC_STRUCT(hHal);
-    tpRequestFullPowerEntry pRequestFullPowerEntry;
-    tListElem *pEntry;
+    tpRequestFullPowerEntry pEntry;
 
 #ifdef FEATURE_WLAN_DIAG_SUPPORT    
     WLAN_VOS_DIAG_EVENT_DEF(psRequest, vos_event_wlan_powersave_payload_type);
@@ -1019,14 +1018,17 @@ eHalStatus pmcRequestFullPower (tHalHandle hHal, void (*callbackRoutine) (void *
         {
             pmcLog(pMac, LOGE, FL("Cannot cancel IMPS timer"));
         }
+    /* Enter Request Full Power State. */
+    if (pmcEnterRequestFullPowerState(hHal, fullPowerReason) != eHAL_STATUS_SUCCESS)
+        return eHAL_STATUS_FAILURE;
 
     /* If able to enter Request Full Power State, then request is pending.
        Allocate entry for request full power callback routine list. */
     //If caller doesn't need a callback, simply waits up the chip.
-    if (callbackRoutine)
+    if( callbackRoutine )
     {
-        pRequestFullPowerEntry = vos_mem_malloc(sizeof(tRequestFullPowerEntry));
-        if (NULL == pRequestFullPowerEntry)
+        pEntry = vos_mem_malloc(sizeof(tRequestFullPowerEntry));
+        if ( NULL == pEntry )
         {
             pmcLog(pMac, LOGE,
                    FL("Cannot allocate memory for request full power routine list entry"));
@@ -1035,24 +1037,11 @@ eHalStatus pmcRequestFullPower (tHalHandle hHal, void (*callbackRoutine) (void *
         }
 
         /* Store routine and context in entry. */
-        pRequestFullPowerEntry->callbackRoutine = callbackRoutine;
-        pRequestFullPowerEntry->callbackContext = callbackContext;
+        pEntry->callbackRoutine = callbackRoutine;
+        pEntry->callbackContext = callbackContext;
 
         /* Add entry to list. */
-        csrLLInsertTail(&pMac->pmc.requestFullPowerList, &pRequestFullPowerEntry->link, TRUE);
-    }
-    /* Enter Request Full Power State. */
-    if (pmcEnterRequestFullPowerState(hHal, fullPowerReason) != eHAL_STATUS_SUCCESS)
-    {
-        /* If pmcEnterRequestFullPowerState fails ; driver need to remove callback
-         * from requestFullPowerList */
-        if (callbackRoutine)
-        {
-            pEntry = csrLLRemoveTail(&pMac->pmc.requestFullPowerList, TRUE);
-            pRequestFullPowerEntry = GET_BASE_ADDR(pEntry, tRequestFullPowerEntry, link);
-            vos_mem_free(pRequestFullPowerEntry);
-        }
-        return eHAL_STATUS_FAILURE;
+        csrLLInsertTail(&pMac->pmc.requestFullPowerList, &pEntry->link, TRUE);
     }
 
     return eHAL_STATUS_PMC_PENDING;
@@ -1420,11 +1409,8 @@ static void pmcProcessResponse( tpAniSirGlobal pMac, tSirSmeRsp *pMsg )
                 pmcLog(pMac, LOGP,
                        FL("Response message to request to exit BMPS indicates failure, status %d"),
                        pMsg->statusCode);
-                /*Status is not succes, so set back the pmc state as BMPS*/
-                pMac->pmc.pmcState = BMPS;
             }
-            else
-                pmcEnterFullPowerState(pMac);
+            pmcEnterFullPowerState(pMac);
         break;
 
         /* We got a response to our Start UAPSD request.  */

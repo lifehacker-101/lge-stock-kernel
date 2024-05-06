@@ -238,10 +238,6 @@ int bdPduInterruptGetThreshold = WLANTL_BD_PDU_INTERRUPT_GET_THRESHOLD;
 /* Maximum value of SNR that can be calculated by the HW */
 #define WLANTL_MAX_HW_SNR 35
 
-#define DISABLE_ARP_TOGGLE 0
-#define ENABLE_ARP_TOGGLE  1
-#define SEND_ARP_ON_WQ5    2
-
 /*----------------------------------------------------------------------------
  * Type Declarations
  * -------------------------------------------------------------------------*/
@@ -1245,8 +1241,7 @@ WLANTL_RegisterSTAClient
   {
     wlan_cfgGetInt(pMac, WNI_CFG_TOGGLE_ARP_BDRATES, &istoggleArpEnb);
   }
-  pClientSTA->arpRate = istoggleArpEnb ? ENABLE_ARP_TOGGLE : DISABLE_ARP_TOGGLE;
-  pClientSTA->arpOnWQ5 = istoggleArpEnb == SEND_ARP_ON_WQ5;
+  pClientSTA->arpRate = (v_U8_t)istoggleArpEnb;
 
   TLLOG2(VOS_TRACE( VOS_MODULE_ID_TL, VOS_TRACE_LEVEL_INFO_HIGH,
    "WLAN TL:Registering STA Client ID: %d with UC %d and BC %d toggleArp :%hhu",
@@ -8071,10 +8066,6 @@ WLANTL_STATxAuth
 #endif /* FEATURE_WLAN_TDLS */
   if( tlMetaInfo.ucIsArp )
   {
-    if (pStaClient->arpOnWQ5)
-    {
-        ucTxFlag |= HAL_USE_FW_IN_TX_PATH;
-    }
     if (pStaClient->arpRate == 0)
     {
         ucTxFlag |= HAL_USE_BD_RATE_1_MASK;
