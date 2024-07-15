@@ -2279,11 +2279,6 @@ This feature requires the dependent cfg.ini "gRoamPrefer5GHz" set to 1 */
 #define CFG_IGNORE_PEER_ERP_INFO_MAX       ( 1 )
 #define CFG_IGNORE_PEER_ERP_INFO_DEFAULT   ( 0 )
 
-#define CFG_IGNORE_PEER_HT_MODE_NAME       "gIgnorePeerHTopMode"
-#define CFG_IGNORE_PEER_HT_MODE_MIN        ( 0 )
-#define CFG_IGNORE_PEER_HT_MODE_MAX        ( 1 )
-#define CFG_IGNORE_PEER_HT_MODE_DEFAULT    ( 0 )
-
 #define CFG_INITIAL_DWELL_TIME_NAME            "gInitialDwellTime"
 #define CFG_INITIAL_DWELL_TIME_DEFAULT         (0)
 #define CFG_INITIAL_DWELL_TIME_MIN             (0)
@@ -2343,13 +2338,6 @@ This feature requires the dependent cfg.ini "gRoamPrefer5GHz" set to 1 */
 #define CFG_ENABLE_MAC_ADDR_SPOOFING_MIN                     (0)
 #define CFG_ENABLE_MAC_ADDR_SPOOFING_MAX                     (1)
 #define CFG_ENABLE_MAC_ADDR_SPOOFING_DEFAULT                 (0)
-
-/* Disable Mac Spoof for p2p Scan */
-#define CFG_DISABLE_P2P_MAC_ADDR_SPOOFING              "gDisableP2PMacAddrSpoof"
-#define CFG_DISABLE_P2P_MAC_ADDR_SPOOFING_MIN          (0)
-#define CFG_DISABLE_P2P_MAC_ADDR_SPOOFING_MAX          (1)
-#define CFG_DISABLE_P2P_MAC_ADDR_SPOOFING_DEFAULT      (0)
-
 
 #define CFG_ENABLE_MGMT_LOGGING                         "gEnableMgmtLogging"
 #define CFG_ENABLE_MGMT_LOGGING_MIN                     (0)
@@ -2504,7 +2492,7 @@ This feature requires the dependent cfg.ini "gRoamPrefer5GHz" set to 1 */
 
 #define CFG_TOGGLE_ARP_BDRATES_NAME       "gToggleArpBDRates"
 #define CFG_TOGGLE_ARP_BDRATES_MIN         0
-#define CFG_TOGGLE_ARP_BDRATES_MAX         2
+#define CFG_TOGGLE_ARP_BDRATES_MAX         1
 #define CFG_TOGGLE_ARP_BDRATES_DEFAULT     0
 
 /*
@@ -2522,11 +2510,6 @@ This feature requires the dependent cfg.ini "gRoamPrefer5GHz" set to 1 */
 #define CFG_LINK_FAIL_TX_CNT_MIN     ( 50 )
 #define CFG_LINK_FAIL_TX_CNT_MAX     ( 1000 )
 #define CFG_LINK_FAIL_TX_CNT_DEF     ( 200 )
-
-#define CFG_OPTIMIZE_CA_EVENT_NAME       "gOptimizeCAevent"
-#define CFG_OPTIMIZE_CA_EVENT_DISABLE    ( 0 )
-#define CFG_OPTIMIZE_CA_EVENT_ENABLE     ( 1 )
-#define CFG_OPTIMIZE_CA_EVENT_DEFAULT    ( 0 )
 
 /*--------------------------------------------------------------------------- 
   Type declarations
@@ -3002,7 +2985,6 @@ typedef struct
    v_U32_t                     deferImpsTime;
    v_BOOL_t                    sendDeauthBeforeCon;
    v_BOOL_t                    enableMacSpoofing;
-   v_BOOL_t                    disableP2PMacSpoofing;
    v_BOOL_t                    enableMgmtLogging;
    v_BOOL_t                    enableBMUHWtracing;
    v_BOOL_t                    enableFWLogging;
@@ -3039,10 +3021,7 @@ typedef struct
    v_U32_t                     btcStaticOppWlanIdleBtLen;
    v_U32_t                     linkFailTimeout;
    v_U32_t                     linkFailTxCnt;
-   v_BOOL_t                    ignorePeerHTopMode;
-   v_U8_t                      gOptimizeCAevent;
 } hdd_config_t;
-
 /*--------------------------------------------------------------------------- 
   Function declarations and documenation
   -------------------------------------------------------------------------*/ 

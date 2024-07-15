@@ -37,7 +37,13 @@
 #include <linux/hash.h>
 #include <linux/nsproxy.h>
 #include <linux/backing-dev.h>
+#ifdef CONFIG_CRYPTO_DEV_KFIPS
+#include <linux/crypto.h>
+#endif
 #include <linux/ecryptfs.h>
+#ifdef CONFIG_SD_ENCRYPTION_MANAGER
+#include "sdcard_encrypt_mgr.h"
+#endif
 
 #define ECRYPTFS_DEFAULT_IV_BYTES 16
 #define ECRYPTFS_DEFAULT_EXTENT_SIZE 4096
@@ -135,6 +141,9 @@ ecryptfs_get_key_payload_data(struct key *key)
 #define ECRYPTFS_DEFAULT_CIPHER "aes"
 #define ECRYPTFS_DEFAULT_KEY_BYTES 16
 #define ECRYPTFS_DEFAULT_HASH "md5"
+#ifdef CONFIG_CRYPTO_FIPS
+#define ECRYPTFS_SHA256_HASH "sha256"
+#endif
 #define ECRYPTFS_TAG_70_DIGEST ECRYPTFS_DEFAULT_HASH
 #define ECRYPTFS_TAG_1_PACKET_TYPE 0x01
 #define ECRYPTFS_TAG_3_PACKET_TYPE 0x8C
@@ -161,6 +170,9 @@ ecryptfs_get_key_payload_data(struct key *key)
 #define ECRYPTFS_FILENAME_MIN_RANDOM_PREPEND_BYTES 16
 #define ECRYPTFS_NON_NULL 0x42 /* A reasonable substitute for NULL */
 #define MD5_DIGEST_SIZE 16
+#ifdef CONFIG_CRYPTO_FIPS
+#define SHA256_HASH_SIZE 32
+#endif
 #define ECRYPTFS_TAG_70_DIGEST_SIZE MD5_DIGEST_SIZE
 #define ECRYPTFS_TAG_70_MIN_METADATA_SIZE (1 + ECRYPTFS_MIN_PKT_LEN_SIZE \
 					   + ECRYPTFS_SIG_SIZE + 1 + 1)
@@ -220,7 +232,11 @@ struct ecryptfs_crypt_stat {
 	size_t extent_shift;
 	unsigned int extent_mask;
 	struct ecryptfs_mount_crypt_stat *mount_crypt_stat;
+#ifndef CONFIG_CRYPTO_DEV_KFIPS
 	struct crypto_blkcipher *tfm;
+#else
+	struct crypto_ablkcipher *tfm;
+#endif
 	struct crypto_hash *hash_tfm; /* Crypto context for generating
 				       * the initialization vectors */
 	unsigned char cipher[ECRYPTFS_MAX_CIPHER_NAME_SIZE];
@@ -318,6 +334,7 @@ struct ecryptfs_mount_crypt_stat {
 #define ECRYPTFS_GLOBAL_ENCFN_USE_MOUNT_FNEK   0x00000020
 #define ECRYPTFS_GLOBAL_ENCFN_USE_FEK          0x00000040
 #define ECRYPTFS_GLOBAL_MOUNT_AUTH_TOK_ONLY    0x00000080
+
 	u32 flags;
 	struct list_head global_auth_tok_list;
 	struct mutex global_auth_tok_list_mutex;
@@ -330,10 +347,21 @@ struct ecryptfs_mount_crypt_stat {
 	char global_default_fnek_sig[ECRYPTFS_SIG_SIZE_HEX + 1];
 };
 
+#ifdef FEATURE_SDCARD_ENCRYPTION
+struct ecryptfs_mount_sd_crypt_stat {
+#define ECRYPTFS_DECRYPTION_ONLY               0x00000001
+#define ECRYPTFS_MEDIA_EXCEPTION               0x00000002
+	u32 flags;
+};
+#endif
+
 /* superblock private data. */
 struct ecryptfs_sb_info {
 	struct super_block *wsi_sb;
 	struct ecryptfs_mount_crypt_stat mount_crypt_stat;
+#ifdef FEATURE_SDCARD_ENCRYPTION
+	struct ecryptfs_mount_sd_crypt_stat mount_sd_crypt_stat;
+#endif
 	struct backing_dev_info bdi;
 };
 
@@ -551,6 +579,10 @@ extern struct kmem_cache *ecryptfs_key_sig_cache;
 extern struct kmem_cache *ecryptfs_global_auth_tok_cache;
 extern struct kmem_cache *ecryptfs_key_tfm_cache;
 extern struct kmem_cache *ecryptfs_open_req_cache;
+#ifdef CONFIG_CRYPTO_DEV_KFIPS
+extern struct kmem_cache *ecryptfs_page_crypt_req_cache;
+extern struct kmem_cache *ecryptfs_extent_crypt_req_cache;
+#endif
 
 struct ecryptfs_open_req {
 #define ECRYPTFS_REQ_PROCESSED 0x00000001
@@ -565,6 +597,32 @@ struct ecryptfs_open_req {
 	struct list_head kthread_ctl_list;
 };
 
+#ifdef CONFIG_CRYPTO_DEV_KFIPS
+struct ecryptfs_page_crypt_req;
+typedef void (*page_crypt_completion)(
+	struct ecryptfs_page_crypt_req *page_crypt_req);
+
+struct ecryptfs_page_crypt_req {
+	struct page *page;
+	atomic_t num_refs;
+	atomic_t rc;
+	page_crypt_completion completion_func;
+	struct completion completion;
+};
+
+struct ecryptfs_extent_crypt_req {
+	struct ecryptfs_page_crypt_req *page_crypt_req;
+	struct ablkcipher_request *req;
+	struct ecryptfs_crypt_stat *crypt_stat;
+	struct inode *inode;
+	struct page *enc_extent_page;
+	char extent_iv[ECRYPTFS_MAX_IV_BYTES];
+	unsigned long extent_offset;
+	struct scatterlist src_sg;
+	struct scatterlist dst_sg;
+};
+
+#endif
 struct inode *ecryptfs_get_inode(struct inode *lower_inode,
 				 struct super_block *sb);
 void ecryptfs_i_size_init(const char *page_virt, struct inode *inode);
@@ -591,8 +649,23 @@ void ecryptfs_destroy_mount_crypt_stat(
 	struct ecryptfs_mount_crypt_stat *mount_crypt_stat);
 int ecryptfs_init_crypt_ctx(struct ecryptfs_crypt_stat *crypt_stat);
 int ecryptfs_write_inode_size_to_metadata(struct inode *ecryptfs_inode);
+#ifdef CONFIG_CRYPTO_DEV_KFIPS
+struct ecryptfs_page_crypt_req *ecryptfs_alloc_page_crypt_req(
+	struct page *page,
+	page_crypt_completion completion_func);
+void ecryptfs_free_page_crypt_req(
+	struct ecryptfs_page_crypt_req *page_crypt_req);
+#endif
 int ecryptfs_encrypt_page(struct page *page);
+#ifdef CONFIG_CRYPTO_DEV_KFIPS
+void ecryptfs_encrypt_page_async(
+	struct ecryptfs_page_crypt_req *page_crypt_req);
+#endif
 int ecryptfs_decrypt_page(struct page *page);
+#ifdef CONFIG_CRYPTO_DEV_KFIPS
+void ecryptfs_decrypt_page_async(
+	struct ecryptfs_page_crypt_req *page_crypt_req);
+#endif
 int ecryptfs_write_metadata(struct dentry *ecryptfs_dentry,
 			    struct inode *ecryptfs_inode);
 int ecryptfs_read_metadata(struct dentry *ecryptfs_dentry);

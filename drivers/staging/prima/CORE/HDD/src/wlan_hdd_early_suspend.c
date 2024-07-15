@@ -1095,7 +1095,7 @@ VOS_STATUS hdd_conf_arp_offload(hdd_adapter_t *pAdapter, int fenable)
    tSirHostOffloadReq  offLoadRequest;
    hdd_context_t *pHddCtx = WLAN_HDD_GET_CTX(pAdapter);
 
-   hddLog(VOS_TRACE_LEVEL_INFO, FL(" fenable = %d "), fenable);
+   hddLog(VOS_TRACE_LEVEL_INFO, FL(" fenable = %d \n"), fenable);
 
    if(fenable)
    {
@@ -1727,7 +1727,7 @@ void hdd_resume_wlan(void)
 
    if (!pHddCtx->hdd_wlan_suspended)
    {
-      hddLog(VOS_TRACE_LEVEL_INFO,
+      hddLog(VOS_TRACE_LEVEL_ERROR,
              "%s: Ignore resume wlan, Already resumed!", __func__);
       return;
    }
@@ -2239,6 +2239,8 @@ VOS_STATUS hdd_wlan_re_init(void)
 
     /* Restart all adapters */
    hdd_start_all_adapters(pHddCtx);
+   pHddCtx->isLogpInProgress = FALSE;
+   vos_set_logp_in_progress(VOS_MODULE_ID_VOSS, FALSE);
    pHddCtx->hdd_mcastbcast_filter_set = FALSE;
    pHddCtx->btCoexModeSet = FALSE;
    hdd_register_mcast_bcast_filter(pHddCtx);

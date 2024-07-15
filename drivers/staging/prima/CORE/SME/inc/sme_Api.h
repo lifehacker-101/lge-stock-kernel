@@ -3576,7 +3576,6 @@ eHalStatus sme_AddChAvoidCallback
 );
 #endif /* FEATURE_WLAN_CH_AVOID */
 eHalStatus sme_UpdateConnectDebug(tHalHandle hHal, tANI_U32 set_value);
-
 /* ---------------------------------------------------------------------------
     \fn sme_requestTypetoString
     \brief API to convert requestType enum values
@@ -3710,8 +3709,5 @@ tANI_BOOLEAN sme_handleSetFccChannel(tHalHandle hHal,
 eHalStatus sme_DeleteAllTDLSPeers(tHalHandle hHal, uint8_t sessionId);
 eHalStatus sme_fatal_event_logs_req(tHalHandle hHal, tANI_U32 is_fatal,
                                tANI_U32 indicator, tANI_U32 reason_code);
-
-eHalStatus sme_enableDisableChanAvoidIndEvent(tHalHandle hHal,
-                                              tANI_U8 set_value);
 
 #endif //#if !defined( __SME_API_H )

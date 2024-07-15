@@ -1698,7 +1698,7 @@ int hdd_setP2pNoa( struct net_device *dev, tANI_U8 *command )
     {
         VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
                "%s: P2P_SET GO NoA: fail to read param "
-               "count=%d duration=%d interval=%d ",
+               "count=%d duration=%d interval=%d \n",
                 __func__, count, start_time, duration);
         return -EINVAL;
     }
@@ -1784,7 +1784,7 @@ int hdd_setP2pOpps( struct net_device *dev, tANI_U8 *command )
     {
         VOS_TRACE (VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
                  "%s: P2P_SET GO PS: fail to read param "
-                 " legacy_ps=%d opp_ps=%d ctwindow=%d ",
+                 " legacy_ps=%d opp_ps=%d ctwindow=%d \n",
                  __func__, legacy_ps, opp_ps, ctwindow);
         return -EINVAL;
     }
@@ -2012,17 +2012,12 @@ int __wlan_hdd_add_virtual_intf( struct wiphy *wiphy, char *name,
 #endif
     }
 
-    if ((type == NL80211_IFTYPE_P2P_CLIENT) ||
-          (type == NL80211_IFTYPE_P2P_GO))
-    {
-        /* Below function Notifies Mode change and
-         * If p2p session is detected then invokes functionality to
-         * Teardown TDLS links and disable offchannel if any. Since
-         * TDLS is not supported in case of concurrency.
-         */
-        hddLog(LOG1, FL("Interface type = %d"), type);
-        hdd_tdls_notify_mode_change(pAdapter, pHddCtx);
-    }
+    /* Below function Notifies Mode change and
+     * If p2p session is detected then invokes functionality to
+     * Teardown TDLS links and disable offchannel if any. Since
+     * TDLS is not supported in case of concurrency.
+     */
+    hdd_tdls_notify_mode_change(pAdapter, pHddCtx);
 
     EXIT();
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,6,0))
